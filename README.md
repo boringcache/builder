@@ -79,7 +79,7 @@ for Dockerfile or recipe variables.
 ## Cache expensive work
 
 Local caching is on by default for recipe steps and Dockerfile `RUN`
-instructions:
+instructions. Source changes invalidate the next cached build step automatically:
 
 ```sh
 boringbuilder build

@@ -259,6 +259,8 @@ struct PreparedCaches<'a> {
     current_operation_index: usize,
     /// Semantic identity of the current rootfs state after the previous exec step.
     current_state_key: String,
+    /// Whether non-exec operations changed the rootfs since the previous exec step.
+    rootfs_state_dirty: bool,
     /// Semantic identity of the current exec step result.
     pending_step_state_key: Option<String>,
     /// Debug metadata describing declared input hashes for the pending exec step.
@@ -313,6 +315,7 @@ impl<'a> PreparedCaches<'a> {
             current_step_index: 0,
             current_operation_index: 0,
             current_state_key: initial_step_state_key(pipeline),
+            rootfs_state_dirty: true,
             pending_step_state_key: None,
             pending_step_state_debug: None,
             setup_snapshot_restored: false,
@@ -471,6 +474,7 @@ impl OperationCacheHooks for PreparedCaches<'_> {
                 &self.pipeline,
                 step,
                 snapshot_rootfs,
+                self.rootfs_state_dirty,
             )?;
             let step_state_key = step_state.key.clone();
             self.pending_step_state_key = Some(step_state_key.clone());
@@ -624,6 +628,9 @@ impl OperationCacheHooks for PreparedCaches<'_> {
             }
             self.pending_step_state_debug = None;
             self.current_step_index += 1;
+            self.rootfs_state_dirty = false;
+        } else {
+            self.rootfs_state_dirty = true;
         }
         self.current_operation_index += 1;
         self.pre_step_snapshot = None;
@@ -639,6 +646,9 @@ impl OperationCacheHooks for PreparedCaches<'_> {
             }
             self.pending_step_state_debug = None;
             self.current_step_index += 1;
+            self.rootfs_state_dirty = false;
+        } else {
+            self.rootfs_state_dirty = true;
         }
         self.current_operation_index += 1;
         Ok(0)
@@ -917,6 +927,98 @@ mod tests {
         let second = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn automatic_step_state_key_tracks_rootfs_content_changes() {
+        let temp = tempdir().unwrap();
+        let rootfs = temp.path().join("rootfs");
+        fs::create_dir_all(rootfs.join("src")).unwrap();
+        fs::write(rootfs.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+        let pipeline = Pipeline {
+            image: "rust:1.94".to_string(),
+            platform: "linux/amd64".to_string(),
+            workdir: "/src".to_string(),
+            env: BTreeMap::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            setup_snapshot: None,
+            operations: Vec::new(),
+            export: None,
+            metadata: None,
+            base_dir: temp.path().to_path_buf(),
+            needs: Vec::new(),
+            stage_dependency_digests: BTreeMap::new(),
+            stage_snapshot_follow_symlinks: Default::default(),
+            docker_context: None,
+        };
+        let step = Step {
+            name: Some("build".to_string()),
+            run: "cargo build --release".to_string(),
+            run_exec: None,
+            run_mounts: Vec::new(),
+            env: BTreeMap::new(),
+            workdir: Some("/src".to_string()),
+            shell: None,
+            build_cache_inputs: None,
+            build_cache: None,
+            tag: None,
+        };
+
+        let first = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
+        fs::write(
+            rootfs.join("src/main.rs"),
+            "fn main() { println!(\"changed\"); }\n",
+        )
+        .unwrap();
+        let second = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn automatic_step_state_key_ignores_uncaptured_package_manager_state() {
+        let temp = tempdir().unwrap();
+        let rootfs = temp.path().join("rootfs");
+        fs::create_dir_all(rootfs.join("var/lib/apt/lists")).unwrap();
+        fs::write(rootfs.join("var/lib/apt/lists/packages"), "one\n").unwrap();
+
+        let pipeline = Pipeline {
+            image: "debian:bookworm-slim".to_string(),
+            platform: "linux/amd64".to_string(),
+            workdir: "/".to_string(),
+            env: BTreeMap::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            setup_snapshot: None,
+            operations: Vec::new(),
+            export: None,
+            metadata: None,
+            base_dir: temp.path().to_path_buf(),
+            needs: Vec::new(),
+            stage_dependency_digests: BTreeMap::new(),
+            stage_snapshot_follow_symlinks: Default::default(),
+            docker_context: None,
+        };
+        let step = Step {
+            name: Some("build".to_string()),
+            run: "true".to_string(),
+            run_exec: None,
+            run_mounts: Vec::new(),
+            env: BTreeMap::new(),
+            workdir: None,
+            shell: None,
+            build_cache_inputs: None,
+            build_cache: None,
+            tag: None,
+        };
+
+        let first = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
+        fs::write(rootfs.join("var/lib/apt/lists/packages"), "two\n").unwrap();
+        let second = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
+
+        assert_eq!(first, second);
     }
 
     #[test]
