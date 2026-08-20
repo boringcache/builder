@@ -114,6 +114,7 @@ jobs:
             target/release/boringbuilder build \
               -f Dockerfile \
               --platform linux/amd64 \
+              --build-arg "BORINGBUILDER_CACHE_EPOCH=$GITHUB_RUN_ID" \
               --format oci \
               -o dist/dogfood/image.oci \
               --cache boringcache \
@@ -130,6 +131,7 @@ jobs:
             target/release/boringbuilder build \
               -f Dockerfile \
               --platform linux/amd64 \
+              --build-arg "BORINGBUILDER_CACHE_EPOCH=$GITHUB_RUN_ID" \
               --format oci \
               -o dist/dogfood/warm-image.oci \
               --cache boringcache \
