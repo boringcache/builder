@@ -53,7 +53,7 @@ const CONTEXT_GUEST_DIR: &str = "/boringbuilder-context";
 const STEP_SLICE_RESTORE_MIN_FREE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const STEP_SLICE_RESTORE_FREE_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
 const STEP_SLICE_RESTORE_ARCHIVE_EXPANSION_FACTOR: u64 = 6;
-const MACOS_CONTAINER_STEP_SLICE_CAPTURE_ABI: &str = "macos-container-ctime-marker-v2";
+const MACOS_CONTAINER_STEP_SLICE_CAPTURE_ABI: &str = "macos-container-ctime-marker-v3";
 
 enum ActiveRunMountSource {
     Bind {
@@ -1888,9 +1888,6 @@ fn build_capture_find_command(predicate: &str, excluded_paths: &[String]) -> Str
         append_find_exclude_path(&mut script, path);
     }
     append_find_exclude_exact_path(&mut script, "/.boringbuilder-slice-marker");
-    for prefix in crate::cache::slice::STEP_SLICE_IGNORED_PREFIXES {
-        append_find_exclude_path(&mut script, &format!("/{prefix}"));
-    }
     for path in excluded_paths {
         append_find_exclude_path(&mut script, path);
     }
@@ -2448,7 +2445,7 @@ fn build_container_hash_script(container_path: &str, excludes: &[String]) -> Res
             .map(str::to_string),
         );
         effective_excludes.extend(
-            crate::cache::slice::STEP_SLICE_IGNORED_PREFIXES
+            crate::cache::slice::STEP_STATE_IGNORED_PREFIXES
                 .iter()
                 .map(|path| (*path).to_string()),
         );
@@ -3707,7 +3704,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_script_excludes_apt_archives() {
+    fn capture_script_keeps_package_manager_outputs() {
         let script = build_capture_slice_script(&[]);
 
         assert!(script.contains("-cnewer /.boringbuilder-slice-marker"));
@@ -3718,12 +3715,15 @@ mod tests {
             "/boringbuilder-run-mounts",
             "/boringbuilder-ssh-agents",
             "/boringbuilder-stage-snapshot",
+        ] {
+            assert!(script.contains(shell_words::quote(excluded).as_ref()));
+        }
+        for included in [
             "/var/cache/apt/archives",
-            "/var/cache/apt/archives/*",
             "/var/lib/apt/lists",
             "/var/log/apt",
         ] {
-            assert!(script.contains(shell_words::quote(excluded).as_ref()));
+            assert!(!script.contains(shell_words::quote(included).as_ref()));
         }
 
         assert!(script.contains("-mindepth 1"));

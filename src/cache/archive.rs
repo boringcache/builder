@@ -210,9 +210,16 @@ mod tests {
         let file = fs::File::create(&archive_path).unwrap();
         let mut builder = tar::Builder::new(file);
         let mut header = tar::Header::new_gnu();
+        let expected_mode = if nix::unistd::Uid::effective().is_root() {
+            0o4755
+        } else {
+            // macOS can clear setuid on files created by an unprivileged user;
+            // the sticky bit still proves extended mode preservation.
+            0o1755
+        };
         header.set_uid(123);
         header.set_gid(456);
-        header.set_mode(0o4755);
+        header.set_mode(expected_mode);
         header.set_mtime(0);
         header.set_size(4);
         header.set_cksum();
@@ -231,7 +238,7 @@ mod tests {
         .unwrap();
 
         let metadata = fs::metadata(destination.join("owned")).unwrap();
-        assert_eq!(metadata.permissions().mode() & 0o7777, 0o4755);
+        assert_eq!(metadata.permissions().mode() & 0o7777, expected_mode);
         if nix::unistd::Uid::effective().is_root() {
             assert_eq!(metadata.uid(), 123);
             assert_eq!(metadata.gid(), 456);

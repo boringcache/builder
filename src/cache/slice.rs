@@ -22,7 +22,7 @@ use crate::cache::backend::{CacheBackend, CacheManifest, tree_cache_manifest};
 use crate::util::fs_tree::is_pseudo_fs;
 use crate::util::hashing::HashingWriter;
 
-pub const STEP_SLICE_IGNORED_PREFIXES: &[&str] = &[
+pub const STEP_STATE_IGNORED_PREFIXES: &[&str] = &[
     "var/cache/apt/archives",
     "var/lib/apt/lists",
     "var/lib/dpkg/lock",
@@ -87,17 +87,6 @@ pub struct FileMeta {
 /// Snapshot of a directory's file metadata (path → metadata).
 pub type FsSnapshot = BTreeMap<PathBuf, FileMeta>;
 
-fn is_step_slice_ignored_path(root: &Path, path: &Path) -> bool {
-    let Ok(relative) = path.strip_prefix(root) else {
-        return false;
-    };
-
-    STEP_SLICE_IGNORED_PREFIXES.iter().any(|prefix| {
-        let prefix_path = Path::new(prefix);
-        relative == prefix_path || relative.starts_with(prefix_path)
-    })
-}
-
 /// Take a fast metadata snapshot of a directory tree.
 /// Records path, timestamps, size, mode, and ownership without reading contents.
 pub fn snapshot_metadata(root: &Path) -> Result<FsSnapshot> {
@@ -109,9 +98,7 @@ pub fn snapshot_metadata(root: &Path) -> Result<FsSnapshot> {
     let entries = WalkDir::new(root)
         .follow_links(false)
         .into_iter()
-        .filter_entry(|e| {
-            !is_pseudo_fs(root, e.path()) && !is_step_slice_ignored_path(root, e.path())
-        });
+        .filter_entry(|e| !is_pseudo_fs(root, e.path()));
 
     for entry in entries {
         let entry = entry?;
@@ -599,7 +586,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_ignores_volatile_package_manager_state() {
+    fn snapshot_preserves_package_manager_outputs() {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("var/cache/apt/archives/partial")).unwrap();
@@ -615,22 +602,22 @@ mod tests {
 
         let snap = snapshot_metadata(root).unwrap();
 
-        assert!(!snap.contains_key(Path::new("var/lib/apt/lists")));
-        assert!(!snap.contains_key(Path::new("var/lib/apt/lists/lock")));
-        assert!(!snap.contains_key(Path::new("var/lib/apt/lists/partial")));
-        assert!(!snap.contains_key(Path::new("var/cache/apt/archives")));
-        assert!(!snap.contains_key(Path::new("var/cache/apt/archives/pkg.deb")));
-        assert!(!snap.contains_key(Path::new("var/cache/apt/archives/partial")));
-        assert!(!snap.contains_key(Path::new("var/lib/dpkg/lock-frontend")));
-        assert!(!snap.contains_key(Path::new("var/lib/dpkg/updates")));
-        assert!(!snap.contains_key(Path::new("var/log/apt")));
-        assert!(!snap.contains_key(Path::new("var/log/apt/history.log")));
+        assert!(snap.contains_key(Path::new("var/lib/apt/lists")));
+        assert!(snap.contains_key(Path::new("var/lib/apt/lists/lock")));
+        assert!(snap.contains_key(Path::new("var/lib/apt/lists/partial")));
+        assert!(snap.contains_key(Path::new("var/cache/apt/archives")));
+        assert!(snap.contains_key(Path::new("var/cache/apt/archives/pkg.deb")));
+        assert!(snap.contains_key(Path::new("var/cache/apt/archives/partial")));
+        assert!(snap.contains_key(Path::new("var/lib/dpkg/lock-frontend")));
+        assert!(snap.contains_key(Path::new("var/lib/dpkg/updates")));
+        assert!(snap.contains_key(Path::new("var/log/apt")));
+        assert!(snap.contains_key(Path::new("var/log/apt/history.log")));
         assert!(snap.contains_key(Path::new("workspace/cache")));
         assert!(snap.contains_key(Path::new("workspace/cache/app.txt")));
     }
 
     #[test]
-    fn diff_ignores_volatile_package_manager_changes() {
+    fn diff_captures_package_manager_changes() {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("var/cache/apt")).unwrap();
@@ -649,12 +636,12 @@ mod tests {
         let (changed, deleted) = diff_snapshots(&before, &after);
 
         assert!(changed.contains(&PathBuf::from("workspace/app.txt")));
-        assert!(!changed.contains(&PathBuf::from("var/cache/apt/archives")));
-        assert!(!changed.contains(&PathBuf::from("var/cache/apt/archives/pkg.deb")));
-        assert!(!changed.contains(&PathBuf::from("var/cache/apt/archives/partial")));
-        assert!(!changed.contains(&PathBuf::from("var/lib/apt/lists")));
-        assert!(!changed.contains(&PathBuf::from("var/lib/apt/lists/lock")));
-        assert!(!changed.contains(&PathBuf::from("var/lib/apt/lists/partial")));
+        assert!(changed.contains(&PathBuf::from("var/cache/apt/archives")));
+        assert!(changed.contains(&PathBuf::from("var/cache/apt/archives/pkg.deb")));
+        assert!(changed.contains(&PathBuf::from("var/cache/apt/archives/partial")));
+        assert!(changed.contains(&PathBuf::from("var/lib/apt/lists")));
+        assert!(changed.contains(&PathBuf::from("var/lib/apt/lists/lock")));
+        assert!(changed.contains(&PathBuf::from("var/lib/apt/lists/partial")));
         assert!(deleted.is_empty());
     }
 
