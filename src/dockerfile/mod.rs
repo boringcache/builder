@@ -17,6 +17,11 @@ pub fn load_dockerfile(
     build_args: &[(String, String)],
     export: Option<ExportConfig>,
 ) -> Result<PipelineOrMulti> {
+    let context_dir = if context_dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        context_dir
+    };
     let content = fs::read_to_string(path)
         .with_context(|| format!("failed to read Dockerfile {}", path.display()))?;
 
@@ -41,6 +46,8 @@ pub fn is_dockerfile(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use tempfile::tempdir;
 
     use super::load_dockerfile;
@@ -78,5 +85,22 @@ mod tests {
                 if op.sources == vec!["src/a.rb".to_string(), "src/b.rb".to_string()]
                     && op.dest == "/app/"
         ));
+    }
+
+    #[test]
+    fn load_dockerfile_normalizes_an_empty_context_to_current_directory() {
+        let temp = tempdir().unwrap();
+        let dockerfile = temp.path().join("Dockerfile");
+        std::fs::write(&dockerfile, "FROM scratch\n").unwrap();
+
+        let loaded = load_dockerfile(&dockerfile, Path::new(""), None, &[], None).unwrap();
+        let pipeline = match loaded {
+            PipelineOrMulti::Single(pipeline) => pipeline,
+            PipelineOrMulti::Multi(_) => panic!("expected single-stage pipeline"),
+        };
+        let current_dir = std::env::current_dir().unwrap();
+
+        assert_eq!(pipeline.base_dir, current_dir);
+        assert_eq!(pipeline.docker_context.unwrap().root, current_dir);
     }
 }

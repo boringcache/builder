@@ -46,6 +46,7 @@ pub fn unpack_archive(archive_path: &Path, destination: &Path) -> Result<()> {
     let decoder = zstd::Decoder::new(file)
         .with_context(|| format!("failed to decode {}", archive_path.display()))?;
     let mut archive = tar::Archive::new(decoder);
+    configure_unpack(&mut archive);
     archive
         .unpack(destination)
         .with_context(|| format!("failed to restore {}", destination.display()))?;
@@ -65,6 +66,7 @@ pub fn unpack_archive_with_format(
             let file = File::open(archive_path)
                 .with_context(|| format!("failed to open {}", archive_path.display()))?;
             let mut archive = tar::Archive::new(file);
+            configure_unpack(&mut archive);
             archive
                 .unpack(destination)
                 .with_context(|| format!("failed to restore {}", destination.display()))?;
@@ -72,6 +74,11 @@ pub fn unpack_archive_with_format(
         }
         other => bail!("unsupported archive format: {other}"),
     }
+}
+
+fn configure_unpack<R: Read>(archive: &mut tar::Archive<R>) {
+    archive.set_preserve_permissions(true);
+    archive.set_preserve_ownerships(nix::unistd::Uid::effective().is_root());
 }
 
 pub fn hash_file(path: &Path) -> Result<String> {
@@ -173,10 +180,11 @@ use crate::util::hashing::HashingWriter;
 mod tests {
     use std::fs;
     use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     use tempfile::tempdir;
 
-    use super::archive_directory;
+    use super::{archive_directory, unpack_archive_with_format};
 
     #[test]
     fn archives_symlinks_with_long_targets() {
@@ -193,5 +201,47 @@ mod tests {
         let archive = temp.path().join("cache.tar.zst");
         archive_directory(&source, &archive).unwrap();
         assert!(archive.exists());
+    }
+
+    #[test]
+    fn unpack_preserves_extended_mode_and_root_ownership() {
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("owned.tar");
+        let file = fs::File::create(&archive_path).unwrap();
+        let mut builder = tar::Builder::new(file);
+        let mut header = tar::Header::new_gnu();
+        let expected_mode = if nix::unistd::Uid::effective().is_root() {
+            0o4755
+        } else {
+            // macOS can clear setuid on files created by an unprivileged user;
+            // the sticky bit still proves extended mode preservation.
+            0o1755
+        };
+        header.set_uid(123);
+        header.set_gid(456);
+        header.set_mode(expected_mode);
+        header.set_mtime(0);
+        header.set_size(4);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "owned", "data".as_bytes())
+            .unwrap();
+        builder.finish().unwrap();
+
+        let destination = temp.path().join("destination");
+        fs::create_dir(&destination).unwrap();
+        unpack_archive_with_format(
+            &archive_path,
+            &destination,
+            crate::cache::slice::STEP_SLICE_ARCHIVE_FORMAT_TAR,
+        )
+        .unwrap();
+
+        let metadata = fs::metadata(destination.join("owned")).unwrap();
+        assert_eq!(metadata.permissions().mode() & 0o7777, expected_mode);
+        if nix::unistd::Uid::effective().is_root() {
+            assert_eq!(metadata.uid(), 123);
+            assert_eq!(metadata.gid(), 456);
+        }
     }
 }

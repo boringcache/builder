@@ -56,9 +56,19 @@ pub fn run_pipeline(
         use_step_slices,
     )?;
     let run_pipeline = prepared.pipeline.clone();
-    let result = backend.run(&run_pipeline, options, config, Some(&mut prepared));
+    let mut result = backend.run(&run_pipeline, options, config, Some(&mut prepared));
+    if let Ok(summary) = result.as_mut() {
+        merge_step_slice_metrics(&mut summary.timings, &prepared.step_slice_stats);
+    }
     prepared.emit_step_slice_summary();
     result
+}
+
+fn merge_step_slice_metrics(timings: &mut RunTimings, stats: &StepSliceStats) {
+    timings.cache.hit_count += stats.restore_hits;
+    timings.cache.miss_count +=
+        stats.restore_misses + stats.restore_mismatches + stats.restore_failures;
+    timings.cache.save_count += stats.saves;
 }
 
 fn should_use_step_slices(backend: &dyn ExecutionBackend, pipeline: &Pipeline) -> bool {
@@ -77,10 +87,9 @@ fn should_use_step_slices(backend: &dyn ExecutionBackend, pipeline: &Pipeline) -
 }
 
 fn pipeline_uses_step_slices(pipeline: &Pipeline) -> bool {
-    pipeline
-        .operations
-        .iter()
-        .any(|operation| matches!(operation, Operation::Exec(step) if step.tag.is_some()))
+    pipeline.operations.iter().any(
+        |operation| matches!(operation, Operation::Exec(step) if step.build_cache != Some(false)),
+    )
 }
 
 fn host_backend_has_writable_mounts(backend_name: &str, pipeline: &Pipeline) -> bool {
@@ -250,6 +259,8 @@ struct PreparedCaches<'a> {
     current_operation_index: usize,
     /// Semantic identity of the current rootfs state after the previous exec step.
     current_state_key: String,
+    /// Whether non-exec operations changed the rootfs since the previous exec step.
+    rootfs_state_dirty: bool,
     /// Semantic identity of the current exec step result.
     pending_step_state_key: Option<String>,
     /// Debug metadata describing declared input hashes for the pending exec step.
@@ -304,6 +315,7 @@ impl<'a> PreparedCaches<'a> {
             current_step_index: 0,
             current_operation_index: 0,
             current_state_key: initial_step_state_key(pipeline),
+            rootfs_state_dirty: true,
             pending_step_state_key: None,
             pending_step_state_debug: None,
             setup_snapshot_restored: false,
@@ -462,6 +474,7 @@ impl OperationCacheHooks for PreparedCaches<'_> {
                 &self.pipeline,
                 step,
                 snapshot_rootfs,
+                self.rootfs_state_dirty,
             )?;
             let step_state_key = step_state.key.clone();
             self.pending_step_state_key = Some(step_state_key.clone());
@@ -615,6 +628,9 @@ impl OperationCacheHooks for PreparedCaches<'_> {
             }
             self.pending_step_state_debug = None;
             self.current_step_index += 1;
+            self.rootfs_state_dirty = false;
+        } else {
+            self.rootfs_state_dirty = true;
         }
         self.current_operation_index += 1;
         self.pre_step_snapshot = None;
@@ -630,6 +646,9 @@ impl OperationCacheHooks for PreparedCaches<'_> {
             }
             self.pending_step_state_debug = None;
             self.current_step_index += 1;
+            self.rootfs_state_dirty = false;
+        } else {
+            self.rootfs_state_dirty = true;
         }
         self.current_operation_index += 1;
         Ok(0)
@@ -685,7 +704,7 @@ mod tests {
     use tempfile::{TempDir, tempdir};
 
     use crate::backend::{
-        ExecutionBackend, OperationCacheHooks, RunOptions, RunSummary, RunTimings,
+        CacheMetrics, ExecutionBackend, OperationCacheHooks, RunOptions, RunSummary, RunTimings,
     };
     use crate::cache::CacheStore;
     use crate::cache::backend::{CacheBackend, CacheManifest, tree_cache_manifest};
@@ -702,7 +721,43 @@ mod tests {
         StepRunMount,
     };
 
-    use super::{PreparedCaches, RunConfig, run_multi_target_recipe, run_pipeline};
+    use super::{
+        PreparedCaches, RunConfig, merge_step_slice_metrics, run_multi_target_recipe, run_pipeline,
+    };
+
+    fn test_run_config(root: &Path) -> RunConfig {
+        RunConfig {
+            cache_dir: Some(root.join("cache")),
+            ..RunConfig::default()
+        }
+    }
+
+    #[test]
+    fn step_slice_activity_is_included_in_run_cache_metrics() {
+        let mut timings = RunTimings {
+            cache: CacheMetrics {
+                hit_count: 1,
+                miss_count: 2,
+                save_count: 3,
+                ..CacheMetrics::default()
+            },
+            ..RunTimings::default()
+        };
+        let stats = StepSliceStats {
+            restore_hits: 2,
+            restore_misses: 3,
+            restore_mismatches: 4,
+            restore_failures: 5,
+            saves: 6,
+            ..StepSliceStats::default()
+        };
+
+        merge_step_slice_metrics(&mut timings, &stats);
+
+        assert_eq!(timings.cache.hit_count, 3);
+        assert_eq!(timings.cache.miss_count, 14);
+        assert_eq!(timings.cache.save_count, 9);
+    }
 
     struct ManifestOnlyBackend {
         manifest: CacheManifest,
@@ -872,6 +927,101 @@ mod tests {
         let second = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn automatic_step_state_key_tracks_rootfs_content_changes() {
+        let temp = tempdir().unwrap();
+        let rootfs = temp.path().join("rootfs");
+        fs::create_dir_all(rootfs.join("src")).unwrap();
+        fs::write(rootfs.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+        let pipeline = Pipeline {
+            image: "rust:1.94".to_string(),
+            platform: "linux/amd64".to_string(),
+            workdir: "/src".to_string(),
+            env: BTreeMap::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            setup_snapshot: None,
+            operations: Vec::new(),
+            export: None,
+            metadata: None,
+            base_dir: temp.path().to_path_buf(),
+            needs: Vec::new(),
+            stage_dependency_digests: BTreeMap::new(),
+            stage_snapshot_follow_symlinks: Default::default(),
+            docker_context: None,
+        };
+        let step = Step {
+            name: Some("build".to_string()),
+            run: "cargo build --release".to_string(),
+            run_exec: None,
+            run_mounts: Vec::new(),
+            env: BTreeMap::new(),
+            workdir: Some("/src".to_string()),
+            shell: None,
+            build_cache_inputs: None,
+            build_cache: None,
+            tag: None,
+        };
+
+        let first = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
+        fs::write(
+            rootfs.join("src/main.rs"),
+            "fn main() { println!(\"changed\"); }\n",
+        )
+        .unwrap();
+        let second = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn automatic_step_state_key_ignores_uncaptured_package_manager_state() {
+        let temp = tempdir().unwrap();
+        let rootfs = temp.path().join("rootfs");
+        fs::create_dir_all(rootfs.join("var/lib/apt/lists")).unwrap();
+        fs::create_dir_all(rootfs.join("dev")).unwrap();
+        fs::write(rootfs.join("var/lib/apt/lists/packages"), "one\n").unwrap();
+        fs::write(rootfs.join("dev/full"), "one\n").unwrap();
+
+        let pipeline = Pipeline {
+            image: "debian:bookworm-slim".to_string(),
+            platform: "linux/amd64".to_string(),
+            workdir: "/".to_string(),
+            env: BTreeMap::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            setup_snapshot: None,
+            operations: Vec::new(),
+            export: None,
+            metadata: None,
+            base_dir: temp.path().to_path_buf(),
+            needs: Vec::new(),
+            stage_dependency_digests: BTreeMap::new(),
+            stage_snapshot_follow_symlinks: Default::default(),
+            docker_context: None,
+        };
+        let step = Step {
+            name: Some("build".to_string()),
+            run: "true".to_string(),
+            run_exec: None,
+            run_mounts: Vec::new(),
+            env: BTreeMap::new(),
+            workdir: None,
+            shell: None,
+            build_cache_inputs: None,
+            build_cache: None,
+            tag: None,
+        };
+
+        let first = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
+        fs::write(rootfs.join("var/lib/apt/lists/packages"), "two\n").unwrap();
+        fs::write(rootfs.join("dev/full"), "two\n").unwrap();
+        let second = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
+
+        assert_eq!(first, second);
     }
 
     #[test]
@@ -1816,7 +1966,7 @@ mod tests {
             &backend,
             &multi,
             &RunOptions::default(),
-            &RunConfig::default(),
+            &test_run_config(temp.path()),
         )
         .unwrap();
 
@@ -1834,7 +1984,7 @@ mod tests {
     }
 
     #[test]
-    fn tagged_pipeline_still_uses_cache_hooks() {
+    fn untagged_pipeline_uses_automatic_cache_hooks() {
         let backend = RecordingBackend::new();
         let temp = tempdir().unwrap();
         let pipeline = Pipeline {
@@ -1855,7 +2005,7 @@ mod tests {
                 shell: None,
                 build_cache_inputs: None,
                 build_cache: None,
-                tag: Some("shared-runtime-tools".to_string()),
+                tag: None,
             })],
             export: None,
             metadata: None,
@@ -1912,7 +2062,7 @@ mod tests {
             &backend,
             &pipeline,
             &RunOptions::default(),
-            &RunConfig::default(),
+            &test_run_config(temp.path()),
         )
         .unwrap();
 
@@ -1959,7 +2109,7 @@ mod tests {
             docker_context: None,
         };
 
-        let config = RunConfig::default();
+        let config = test_run_config(temp.path());
         run_pipeline(&backend, &pipeline, &RunOptions::default(), &config).unwrap();
 
         assert_eq!(backend.seen_cache_hooks.lock().unwrap().as_slice(), &[true]);
@@ -2002,7 +2152,7 @@ mod tests {
             docker_context: None,
         };
 
-        let config = RunConfig::default();
+        let config = test_run_config(temp.path());
         run_pipeline(&backend, &pipeline, &RunOptions::default(), &config).unwrap();
 
         assert_eq!(
@@ -2137,7 +2287,7 @@ mod tests {
                 export_format_override: Some(crate::schema::ExportFormat::Oci),
                 ..RunOptions::default()
             },
-            &RunConfig::default(),
+            &test_run_config(temp.path()),
         )
         .unwrap();
 
@@ -2233,7 +2383,7 @@ mod tests {
             &backend,
             &multi,
             &RunOptions::default(),
-            &RunConfig::default(),
+            &test_run_config(temp.path()),
         )
         .unwrap();
 
@@ -2329,7 +2479,7 @@ mod tests {
             &backend,
             &multi,
             &RunOptions::default(),
-            &RunConfig::default(),
+            &test_run_config(temp.path()),
         )
         .unwrap();
 

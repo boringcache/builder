@@ -49,10 +49,11 @@ const RUN_MOUNT_GUEST_DIR: &str = "/boringbuilder-run-mounts";
 const LOCAL_CACHE_GUEST_DIR: &str = "/boringbuilder-local-cache";
 const CACHE_TOOLS_GUEST_DIR: &str = "/boringbuilder-cache-tools";
 const SSH_AGENT_GUEST_DIR: &str = "/boringbuilder-ssh-agents";
+const CONTEXT_GUEST_DIR: &str = "/boringbuilder-context";
 const STEP_SLICE_RESTORE_MIN_FREE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const STEP_SLICE_RESTORE_FREE_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
 const STEP_SLICE_RESTORE_ARCHIVE_EXPANSION_FACTOR: u64 = 6;
-const MACOS_CONTAINER_STEP_SLICE_CAPTURE_ABI: &str = "macos-container-ctime-marker-v2";
+const MACOS_CONTAINER_STEP_SLICE_CAPTURE_ABI: &str = "macos-container-ctime-marker-v3";
 
 enum ActiveRunMountSource {
     Bind {
@@ -328,6 +329,7 @@ impl ExecutionBackend for MacosContainerBackend {
         let mut cache_save_ms_total = 0u128;
         let mut step_ordinal = 0usize;
         let mut current_state_key = initial_step_state_key(pipeline);
+        let mut rootfs_state_dirty = true;
         let mut idx = start_index;
         while idx < pipeline.operations.len() {
             if matches!(&pipeline.operations[idx], Operation::Exec(_)) {
@@ -361,6 +363,7 @@ impl ExecutionBackend for MacosContainerBackend {
                         &current_state_key,
                         pipeline,
                         step,
+                        rootfs_state_dirty,
                     )?;
                     step_state_key = Some(computed_state_key.clone());
                     if slice_cache_enabled {
@@ -503,6 +506,7 @@ impl ExecutionBackend for MacosContainerBackend {
                     if let Some(step_state_key) = step_state_key.take() {
                         current_state_key = step_state_key;
                     }
+                    rootfs_state_dirty = false;
                     step_ordinal += 1;
                     idx += 1;
                     continue;
@@ -536,7 +540,7 @@ impl ExecutionBackend for MacosContainerBackend {
                         .iter()
                         .any(|operation| matches!(operation, Operation::CopyFromContext(_)))
                     {
-                        excluded_targets.push("/boringbuilder-context".to_string());
+                        excluded_targets.push(CONTEXT_GUEST_DIR.to_string());
                     }
                     let metadata = crate::cache::slice::SlicePublishMetadata {
                         step_state_key: Some(step_state_key),
@@ -687,6 +691,7 @@ impl ExecutionBackend for MacosContainerBackend {
                 if let Some(step_state_key) = step_state_key.take() {
                     current_state_key = step_state_key;
                 }
+                rootfs_state_dirty = false;
                 step_ordinal += 1;
                 idx += 1;
                 continue;
@@ -705,6 +710,7 @@ impl ExecutionBackend for MacosContainerBackend {
                 .as_mut()
                 .expect("guest helper must exist for filesystem operation batches");
             self.exec_helper_batch(&binary, &container_name, helper, batch)?;
+            rootfs_state_dirty = true;
             let op_ms = op_started.elapsed().as_millis();
             operation_ms_total += op_ms;
             operations.push(OperationTiming {
@@ -1882,9 +1888,6 @@ fn build_capture_find_command(predicate: &str, excluded_paths: &[String]) -> Str
         append_find_exclude_path(&mut script, path);
     }
     append_find_exclude_exact_path(&mut script, "/.boringbuilder-slice-marker");
-    for prefix in crate::cache::slice::STEP_SLICE_IGNORED_PREFIXES {
-        append_find_exclude_path(&mut script, &format!("/{prefix}"));
-    }
     for path in excluded_paths {
         append_find_exclude_path(&mut script, path);
     }
@@ -2211,10 +2214,14 @@ fn hash_step_state_field(hasher: &mut Sha256, label: &str, value: impl AsRef<[u8
 
 fn initial_step_state_key(pipeline: &Pipeline) -> String {
     let mut hasher = Sha256::new();
-    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v2");
+    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v3");
     hash_step_state_field(&mut hasher, "image", pipeline.image.as_bytes());
     hash_step_state_field(&mut hasher, "platform", pipeline.platform.as_bytes());
     hash_step_state_field(&mut hasher, "workdir", pipeline.workdir.as_bytes());
+    for (key, value) in &pipeline.env {
+        hash_step_state_field(&mut hasher, "pipeline-env-key", key.as_bytes());
+        hash_step_state_field(&mut hasher, "pipeline-env-value", value.as_bytes());
+    }
     hex::encode(hasher.finalize())
 }
 
@@ -2410,14 +2417,40 @@ fn build_container_hash_script(container_path: &str, excludes: &[String]) -> Res
         container_path.starts_with('/'),
         "container hash path must be absolute: {container_path}"
     );
-    let relative = container_path.trim_start_matches('/');
-    ensure!(
-        !relative.is_empty(),
-        "refusing to hash container root '/' for step state"
-    );
+    let relative = match container_path.trim_start_matches('/') {
+        "" => ".",
+        relative => relative,
+    };
 
     let mut prune_terms = Vec::new();
-    for exclude in excludes {
+    let mut effective_excludes = excludes.to_vec();
+    if container_path == "/" {
+        effective_excludes.extend(
+            [
+                "proc",
+                "sys",
+                "dev",
+                "tmp",
+                "run",
+                LOCAL_CACHE_GUEST_DIR,
+                CACHE_TOOLS_GUEST_DIR,
+                RUN_MOUNT_GUEST_DIR,
+                SSH_AGENT_GUEST_DIR,
+                CONTEXT_GUEST_DIR,
+                helper_mount_guest_dir(),
+                helper_snapshot_guest_dir(),
+                "/.boringbuilder-slice-marker",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        );
+        effective_excludes.extend(
+            crate::cache::slice::STEP_STATE_IGNORED_PREFIXES
+                .iter()
+                .map(|path| (*path).to_string()),
+        );
+    }
+    for exclude in &effective_excludes {
         ensure!(
             !exclude.trim().is_empty(),
             "empty step cache input exclude is not allowed"
@@ -2489,9 +2522,10 @@ fn compute_step_state_key(
     previous_state_key: &str,
     pipeline: &Pipeline,
     step: &Step,
+    hash_default_rootfs: bool,
 ) -> Result<String> {
     let mut hasher = Sha256::new();
-    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v2");
+    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v3");
     hash_step_state_field(&mut hasher, "previous", previous_state_key.as_bytes());
     if let Some(argv) = &step.run_exec {
         hash_step_state_field(&mut hasher, "run-mode", b"exec");
@@ -2657,16 +2691,24 @@ fn compute_step_state_key(
             }
         }
     }
-    if let Some(inputs) = &step.build_cache_inputs {
-        for input in inputs {
-            hash_step_state_field(&mut hasher, "input-path", input.path.as_bytes());
-            for exclude in &input.exclude {
-                hash_step_state_field(&mut hasher, "input-exclude", exclude.as_bytes());
+    match &step.build_cache_inputs {
+        Some(inputs) => {
+            for input in inputs {
+                hash_step_state_field(&mut hasher, "input-path", input.path.as_bytes());
+                for exclude in &input.exclude {
+                    hash_step_state_field(&mut hasher, "input-exclude", exclude.as_bytes());
+                }
+                let input_hash =
+                    hash_container_path(binary, container_name, &input.path, &input.exclude)?;
+                hash_step_state_field(&mut hasher, "input-hash", input_hash.as_bytes());
             }
-            let input_hash =
-                hash_container_path(binary, container_name, &input.path, &input.exclude)?;
+        }
+        None if hash_default_rootfs => {
+            hash_step_state_field(&mut hasher, "input-path", b"/");
+            let input_hash = hash_container_path(binary, container_name, "/", &[])?;
             hash_step_state_field(&mut hasher, "input-hash", input_hash.as_bytes());
         }
+        None => {}
     }
     Ok(hex::encode(hasher.finalize()))
 }
@@ -2786,6 +2828,47 @@ fn export_container_archive_stream(
     kind: ArchiveExportKind,
     output_path: &Path,
 ) -> Result<PathBuf> {
+    const MAX_ATTEMPTS: usize = 3;
+
+    let mut last_err = None;
+    for attempt in 0..MAX_ATTEMPTS {
+        match export_container_archive_stream_once(
+            binary,
+            container_name,
+            pipeline,
+            kind,
+            output_path,
+        ) {
+            Ok(path) => return Ok(path),
+            Err(err) if archive_stream_error_is_retryable(&err) => {
+                last_err = Some(err);
+                if attempt + 1 < MAX_ATTEMPTS {
+                    eprintln!(
+                        "warning: container {} export was interrupted; retrying ({}/{MAX_ATTEMPTS})",
+                        kind.label(),
+                        attempt + 2
+                    );
+                    sleep(Duration::from_millis(750));
+                }
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| anyhow!("container archive export did not complete")))
+}
+
+fn archive_stream_error_is_retryable(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("export failed with status signal")
+}
+
+fn export_container_archive_stream_once(
+    binary: &Path,
+    container_name: &str,
+    pipeline: &Pipeline,
+    kind: ArchiveExportKind,
+    output_path: &Path,
+) -> Result<PathBuf> {
     ensure!(
         !pipeline.outputs.is_empty(),
         "container-native archive export needs declared outputs"
@@ -2833,8 +2916,6 @@ fn export_container_archive_stream(
     let status = child
         .wait()
         .with_context(|| format!("failed to wait for container {} export", kind.label()))?;
-    write_result.with_context(|| format!("failed to write {}", output_path.display()))?;
-
     if !status.success() {
         let _ = fs::remove_file(output_path);
         bail!(
@@ -2845,6 +2926,10 @@ fn export_container_archive_stream(
                 .map(|code| code.to_string())
                 .unwrap_or_else(|| "signal".to_string())
         );
+    }
+    if let Err(err) = write_result {
+        let _ = fs::remove_file(output_path);
+        return Err(err).with_context(|| format!("failed to write {}", output_path.display()));
     }
 
     Ok(output_path.to_path_buf())
@@ -3258,7 +3343,7 @@ fn append_context_mount_arg(args: &mut Vec<String>, pipeline: &Pipeline) -> Resu
         .root
         .canonicalize()
         .with_context(|| format!("failed to resolve mount {}", context.root.display()))?;
-    append_mount_arg(args, &source, "/boringbuilder-context", true);
+    append_mount_arg(args, &source, CONTEXT_GUEST_DIR, true);
     Ok(())
 }
 
@@ -3593,9 +3678,9 @@ mod tests {
         build_capture_local_slice_script, build_capture_slice_script,
         build_container_archive_export_script, build_container_hash_script,
         build_restore_boringcache_slice_script, cache_blob_tag, default_container_memory_arg,
-        dns_server_usable, dns_servers_from_env, export_container_as_oci_layout,
-        local_cache_blob_guest_path, normalize_tar_stream, parse_local_slice_capture_output,
-        parse_scutil_dns_servers, prefixed_container_exclude,
+        dns_server_usable, dns_servers_from_env, export_container_archive_stream,
+        export_container_as_oci_layout, local_cache_blob_guest_path, normalize_tar_stream,
+        parse_local_slice_capture_output, parse_scutil_dns_servers, prefixed_container_exclude,
         required_step_slice_restore_free_bytes, resolve_container_binary,
         resolved_container_memory_override, resolved_dns_servers, should_export_full_rootfs,
         stop_container_for_export, touch_slice_marker_script,
@@ -3619,7 +3704,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_script_excludes_apt_archives() {
+    fn capture_script_keeps_package_manager_outputs() {
         let script = build_capture_slice_script(&[]);
 
         assert!(script.contains("-cnewer /.boringbuilder-slice-marker"));
@@ -3630,12 +3715,15 @@ mod tests {
             "/boringbuilder-run-mounts",
             "/boringbuilder-ssh-agents",
             "/boringbuilder-stage-snapshot",
+        ] {
+            assert!(script.contains(shell_words::quote(excluded).as_ref()));
+        }
+        for included in [
             "/var/cache/apt/archives",
-            "/var/cache/apt/archives/*",
             "/var/lib/apt/lists",
             "/var/log/apt",
         ] {
-            assert!(script.contains(shell_words::quote(excluded).as_ref()));
+            assert!(!script.contains(shell_words::quote(included).as_ref()));
         }
 
         assert!(script.contains("-mindepth 1"));
@@ -3796,6 +3884,27 @@ mod tests {
         assert!(script.contains("-type f -printf 'file %m %p ' -exec sha256sum"));
         assert!(script.contains("printf 'container-tree-v1:%s\\n'"));
         assert!(script.contains("printf 'container-missing-v1:%s\\n'"));
+    }
+
+    #[test]
+    fn container_hash_script_can_hash_root_without_runtime_state() {
+        let script = build_container_hash_script("/", &[]).unwrap();
+
+        assert!(script.contains("relative=."));
+        for excluded in [
+            "./proc",
+            "./sys",
+            "./dev",
+            "./tmp",
+            "./run",
+            "./boringbuilder-context",
+            "./boringbuilder-local-cache",
+            "./boringbuilder-run-mounts",
+            "./var/lib/apt/lists",
+            "./.boringbuilder-slice-marker",
+        ] {
+            assert!(script.contains(&format!("-path {excluded}")));
+        }
     }
 
     #[test]
@@ -4085,6 +4194,74 @@ resolver #1
         let commands = fs::read_to_string(log).unwrap();
         assert_eq!(commands.lines().count(), 2);
         assert!(commands.contains("stop --time 0 demo"));
+    }
+
+    #[test]
+    fn retries_archive_stream_when_container_exec_is_signaled() {
+        use std::collections::BTreeMap;
+
+        use crate::schema::Pipeline;
+
+        let temp = tempdir().unwrap();
+        let fake = temp.path().join("container");
+        let count = temp.path().join("exec.count");
+        let fixture_root = temp.path().join("fixture");
+        fs::create_dir_all(&fixture_root).unwrap();
+        fs::write(fixture_root.join("hello.txt"), "hello\n").unwrap();
+        let fixture_tar = temp.path().join("fixture.tar");
+        let tar_file = fs::File::create(&fixture_tar).unwrap();
+        let mut builder = Builder::new(tar_file);
+        builder
+            .append_path_with_name(fixture_root.join("hello.txt"), "out/hello.txt")
+            .unwrap();
+        builder.finish().unwrap();
+
+        let script = format!(
+            "#!/bin/sh\nset -eu\ncount=0\nif [ -f {} ]; then count=$(cat {}); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > {}\ncat {}\nif [ \"$count\" -lt 2 ]; then kill -TERM $$; fi\n",
+            shell_words::quote(count.to_str().unwrap()),
+            shell_words::quote(count.to_str().unwrap()),
+            shell_words::quote(count.to_str().unwrap()),
+            shell_words::quote(fixture_tar.to_str().unwrap()),
+        );
+        fs::write(&fake, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&fake).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&fake, perms).unwrap();
+        }
+
+        let pipeline = Pipeline {
+            image: "alpine".to_string(),
+            platform: "linux/arm64".to_string(),
+            workdir: "/".to_string(),
+            env: BTreeMap::new(),
+            inputs: Vec::new(),
+            outputs: vec!["/out".to_string()],
+            setup_snapshot: None,
+            operations: Vec::new(),
+            export: None,
+            metadata: None,
+            base_dir: temp.path().to_path_buf(),
+            needs: Vec::new(),
+            stage_dependency_digests: BTreeMap::new(),
+            stage_snapshot_follow_symlinks: Default::default(),
+            docker_context: None,
+        };
+        let output = temp.path().join("output.tar");
+
+        export_container_archive_stream(&fake, "demo", &pipeline, ArchiveExportKind::Tar, &output)
+            .unwrap();
+
+        assert_eq!(fs::read_to_string(count).unwrap(), "2");
+        let mut archive = tar::Archive::new(fs::File::open(output).unwrap());
+        let paths = archive
+            .entries()
+            .unwrap()
+            .map(|entry| entry.unwrap().path().unwrap().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec![Path::new("out/hello.txt").to_path_buf()]);
     }
 
     #[test]

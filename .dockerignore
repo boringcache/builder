@@ -1,0 +1,11 @@
+.git
+.github
+.boringbuilder
+.boringcache
+dist
+out
+target
+*.gem
+.bundle
+vendor
+.env*

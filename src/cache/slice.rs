@@ -22,7 +22,7 @@ use crate::cache::backend::{CacheBackend, CacheManifest, tree_cache_manifest};
 use crate::util::fs_tree::is_pseudo_fs;
 use crate::util::hashing::HashingWriter;
 
-pub const STEP_SLICE_IGNORED_PREFIXES: &[&str] = &[
+pub const STEP_STATE_IGNORED_PREFIXES: &[&str] = &[
     "var/cache/apt/archives",
     "var/lib/apt/lists",
     "var/lib/dpkg/lock",
@@ -73,7 +73,13 @@ pub struct StepStateInputDebug {
 pub struct FileMeta {
     size: u64,
     mtime_ns: u64,
+    // ctime catches in-place content changes when a tool restores the original
+    // size and mtime (package managers commonly do this from archive metadata).
+    // It is intentionally used for same-run diffing only, not stable cache keys.
+    ctime_ns: u64,
     mode: u32,
+    uid: u32,
+    gid: u32,
     is_dir: bool,
     is_symlink: bool,
 }
@@ -81,19 +87,8 @@ pub struct FileMeta {
 /// Snapshot of a directory's file metadata (path → metadata).
 pub type FsSnapshot = BTreeMap<PathBuf, FileMeta>;
 
-fn is_step_slice_ignored_path(root: &Path, path: &Path) -> bool {
-    let Ok(relative) = path.strip_prefix(root) else {
-        return false;
-    };
-
-    STEP_SLICE_IGNORED_PREFIXES.iter().any(|prefix| {
-        let prefix_path = Path::new(prefix);
-        relative == prefix_path || relative.starts_with(prefix_path)
-    })
-}
-
 /// Take a fast metadata snapshot of a directory tree.
-/// Only records path + mtime + size + mode — does NOT read file contents.
+/// Records path, timestamps, size, mode, and ownership without reading contents.
 pub fn snapshot_metadata(root: &Path) -> Result<FsSnapshot> {
     let mut state = BTreeMap::new();
     if !root.exists() {
@@ -103,9 +98,7 @@ pub fn snapshot_metadata(root: &Path) -> Result<FsSnapshot> {
     let entries = WalkDir::new(root)
         .follow_links(false)
         .into_iter()
-        .filter_entry(|e| {
-            !is_pseudo_fs(root, e.path()) && !is_step_slice_ignored_path(root, e.path())
-        });
+        .filter_entry(|e| !is_pseudo_fs(root, e.path()));
 
     for entry in entries {
         let entry = entry?;
@@ -119,13 +112,19 @@ pub fn snapshot_metadata(root: &Path) -> Result<FsSnapshot> {
         let mtime_ns = (metadata.mtime() as u64)
             .saturating_mul(1_000_000_000)
             .saturating_add(metadata.mtime_nsec() as u64);
+        let ctime_ns = (metadata.ctime() as u64)
+            .saturating_mul(1_000_000_000)
+            .saturating_add(metadata.ctime_nsec() as u64);
 
         state.insert(
             relative,
             FileMeta {
                 size: metadata.len(),
                 mtime_ns,
+                ctime_ns,
                 mode: metadata.permissions().mode() & 0o7777,
+                uid: metadata.uid(),
+                gid: metadata.gid(),
                 is_dir: metadata.is_dir(),
                 is_symlink: metadata.file_type().is_symlink(),
             },
@@ -170,6 +169,8 @@ pub fn snapshot_fingerprint(snapshot: &FsSnapshot) -> String {
         hasher.update(meta.size.to_le_bytes());
         hasher.update(meta.mtime_ns.to_le_bytes());
         hasher.update(meta.mode.to_le_bytes());
+        hasher.update(meta.uid.to_le_bytes());
+        hasher.update(meta.gid.to_le_bytes());
         hasher.update([meta.is_dir as u8, meta.is_symlink as u8]);
         hasher.update(b"\0");
     }
@@ -516,6 +517,53 @@ mod tests {
     }
 
     #[test]
+    fn diff_detects_same_size_content_changes_with_restored_mtime() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("same-metadata.txt");
+        fs::write(&path, "before").unwrap();
+        let original_mtime = fs::metadata(&path).unwrap().modified().unwrap();
+        let before = snapshot_metadata(tmp.path()).unwrap();
+
+        fs::write(&path, "after!").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(original_mtime))
+            .unwrap();
+
+        let after = snapshot_metadata(tmp.path()).unwrap();
+        let (changed, deleted) = diff_snapshots(&before, &after);
+        assert_eq!(changed, vec![PathBuf::from("same-metadata.txt")]);
+        assert!(deleted.is_empty());
+    }
+
+    #[test]
+    fn diff_detects_ownership_changes() {
+        let path = PathBuf::from("owned.txt");
+        let original = FileMeta {
+            size: 4,
+            mtime_ns: 0,
+            ctime_ns: 0,
+            mode: 0o644,
+            uid: 0,
+            gid: 0,
+            is_dir: false,
+            is_symlink: false,
+        };
+        let mut before = BTreeMap::new();
+        before.insert(path.clone(), original.clone());
+
+        let mut after = before.clone();
+        after.get_mut(&path).unwrap().uid = 1000;
+        assert_eq!(diff_snapshots(&before, &after).0, vec![path.clone()]);
+
+        after.insert(path.clone(), original);
+        after.get_mut(&path).unwrap().gid = 1000;
+        assert_eq!(diff_snapshots(&before, &after).0, vec![path]);
+    }
+
+    #[test]
     fn archive_and_restore_round_trips() {
         let tmp = tempdir().unwrap();
         let root = tmp.path().join("rootfs");
@@ -538,7 +586,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_ignores_volatile_package_manager_state() {
+    fn snapshot_preserves_package_manager_outputs() {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("var/cache/apt/archives/partial")).unwrap();
@@ -554,22 +602,22 @@ mod tests {
 
         let snap = snapshot_metadata(root).unwrap();
 
-        assert!(!snap.contains_key(Path::new("var/lib/apt/lists")));
-        assert!(!snap.contains_key(Path::new("var/lib/apt/lists/lock")));
-        assert!(!snap.contains_key(Path::new("var/lib/apt/lists/partial")));
-        assert!(!snap.contains_key(Path::new("var/cache/apt/archives")));
-        assert!(!snap.contains_key(Path::new("var/cache/apt/archives/pkg.deb")));
-        assert!(!snap.contains_key(Path::new("var/cache/apt/archives/partial")));
-        assert!(!snap.contains_key(Path::new("var/lib/dpkg/lock-frontend")));
-        assert!(!snap.contains_key(Path::new("var/lib/dpkg/updates")));
-        assert!(!snap.contains_key(Path::new("var/log/apt")));
-        assert!(!snap.contains_key(Path::new("var/log/apt/history.log")));
+        assert!(snap.contains_key(Path::new("var/lib/apt/lists")));
+        assert!(snap.contains_key(Path::new("var/lib/apt/lists/lock")));
+        assert!(snap.contains_key(Path::new("var/lib/apt/lists/partial")));
+        assert!(snap.contains_key(Path::new("var/cache/apt/archives")));
+        assert!(snap.contains_key(Path::new("var/cache/apt/archives/pkg.deb")));
+        assert!(snap.contains_key(Path::new("var/cache/apt/archives/partial")));
+        assert!(snap.contains_key(Path::new("var/lib/dpkg/lock-frontend")));
+        assert!(snap.contains_key(Path::new("var/lib/dpkg/updates")));
+        assert!(snap.contains_key(Path::new("var/log/apt")));
+        assert!(snap.contains_key(Path::new("var/log/apt/history.log")));
         assert!(snap.contains_key(Path::new("workspace/cache")));
         assert!(snap.contains_key(Path::new("workspace/cache/app.txt")));
     }
 
     #[test]
-    fn diff_ignores_volatile_package_manager_changes() {
+    fn diff_captures_package_manager_changes() {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("var/cache/apt")).unwrap();
@@ -588,12 +636,12 @@ mod tests {
         let (changed, deleted) = diff_snapshots(&before, &after);
 
         assert!(changed.contains(&PathBuf::from("workspace/app.txt")));
-        assert!(!changed.contains(&PathBuf::from("var/cache/apt/archives")));
-        assert!(!changed.contains(&PathBuf::from("var/cache/apt/archives/pkg.deb")));
-        assert!(!changed.contains(&PathBuf::from("var/cache/apt/archives/partial")));
-        assert!(!changed.contains(&PathBuf::from("var/lib/apt/lists")));
-        assert!(!changed.contains(&PathBuf::from("var/lib/apt/lists/lock")));
-        assert!(!changed.contains(&PathBuf::from("var/lib/apt/lists/partial")));
+        assert!(changed.contains(&PathBuf::from("var/cache/apt/archives")));
+        assert!(changed.contains(&PathBuf::from("var/cache/apt/archives/pkg.deb")));
+        assert!(changed.contains(&PathBuf::from("var/cache/apt/archives/partial")));
+        assert!(changed.contains(&PathBuf::from("var/lib/apt/lists")));
+        assert!(changed.contains(&PathBuf::from("var/lib/apt/lists/lock")));
+        assert!(changed.contains(&PathBuf::from("var/lib/apt/lists/partial")));
         assert!(deleted.is_empty());
     }
 

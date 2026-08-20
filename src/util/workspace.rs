@@ -208,6 +208,18 @@ pub fn hash_workspace_tree_with_patterns(
     let mut entries = WalkDir::new(root)
         .follow_links(false)
         .into_iter()
+        .filter_entry(|entry| {
+            let path = entry.path();
+            if path == root {
+                return true;
+            }
+            let Ok(relative) = path.strip_prefix(root) else {
+                return true;
+            };
+            !matcher
+                .matched_path_or_any_parents(relative, entry.file_type().is_dir())
+                .is_ignore()
+        })
         .collect::<std::result::Result<Vec<_>, _>>()?;
     entries.sort_by(|left, right| left.path().cmp(right.path()));
     for entry in entries {
@@ -786,6 +798,24 @@ mod tests {
         let after = hash_path_with_patterns(root, &["target".to_string()]).unwrap();
 
         assert_eq!(before, after);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hash_path_with_patterns_does_not_enter_excluded_directories() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        let excluded = root.join("proc");
+        fs::create_dir_all(&excluded).unwrap();
+        fs::write(excluded.join("volatile"), "value\n").unwrap();
+        fs::set_permissions(&excluded, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = hash_path_with_patterns(root, &["proc".to_string()]);
+
+        fs::set_permissions(&excluded, fs::Permissions::from_mode(0o755)).unwrap();
+        result.unwrap();
     }
 
     #[test]

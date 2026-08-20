@@ -157,10 +157,14 @@ fn hash_step_state_field(hasher: &mut Sha256, label: &str, value: impl AsRef<[u8
 
 pub(crate) fn initial_step_state_key(pipeline: &Pipeline) -> String {
     let mut hasher = Sha256::new();
-    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v2");
+    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v6");
     hash_step_state_field(&mut hasher, "image", pipeline.image.as_bytes());
     hash_step_state_field(&mut hasher, "platform", pipeline.platform.as_bytes());
     hash_step_state_field(&mut hasher, "workdir", pipeline.workdir.as_bytes());
+    for (key, value) in &pipeline.env {
+        hash_step_state_field(&mut hasher, "pipeline-env-key", key.as_bytes());
+        hash_step_state_field(&mut hasher, "pipeline-env-value", value.as_bytes());
+    }
     hex::encode(hasher.finalize())
 }
 
@@ -303,10 +307,11 @@ pub(crate) fn compute_step_state(
     pipeline: &Pipeline,
     step: &Step,
     snapshot_rootfs: &Path,
+    hash_default_rootfs: bool,
 ) -> Result<ComputedStepState> {
     let mut hasher = Sha256::new();
     let mut input_debug = Vec::new();
-    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v2");
+    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v6");
     hash_step_state_field(&mut hasher, "previous", previous_state_key.as_bytes());
     if let Some(argv) = &step.run_exec {
         hash_step_state_field(&mut hasher, "run-mode", b"exec");
@@ -468,20 +473,41 @@ pub(crate) fn compute_step_state(
             }
         }
     }
-    if let Some(inputs) = &step.build_cache_inputs {
-        for input in inputs {
-            hash_step_state_field(&mut hasher, "input-path", input.path.as_bytes());
-            for exclude in &input.exclude {
-                hash_step_state_field(&mut hasher, "input-exclude", exclude.as_bytes());
+    match &step.build_cache_inputs {
+        Some(inputs) => {
+            for input in inputs {
+                hash_step_state_field(&mut hasher, "input-path", input.path.as_bytes());
+                for exclude in &input.exclude {
+                    hash_step_state_field(&mut hasher, "input-exclude", exclude.as_bytes());
+                }
+                let input_hash = hash_step_build_cache_input(snapshot_rootfs, input)?;
+                hash_step_state_field(&mut hasher, "input-hash", input_hash.as_bytes());
+                input_debug.push(crate::cache::slice::StepStateInputDebug {
+                    path: input.path.clone(),
+                    exclude: input.exclude.clone(),
+                    hash: input_hash,
+                });
             }
-            let input_hash = hash_step_build_cache_input(snapshot_rootfs, input)?;
+        }
+        None if hash_default_rootfs => {
+            let input = StepBuildCacheInput {
+                path: "/".to_string(),
+                exclude: crate::util::fs_tree::PSEUDO_FS_DIRS
+                    .iter()
+                    .chain(crate::cache::slice::STEP_STATE_IGNORED_PREFIXES)
+                    .map(|path| (*path).to_string())
+                    .collect(),
+            };
+            hash_step_state_field(&mut hasher, "input-path", input.path.as_bytes());
+            let input_hash = hash_step_build_cache_input(snapshot_rootfs, &input)?;
             hash_step_state_field(&mut hasher, "input-hash", input_hash.as_bytes());
             input_debug.push(crate::cache::slice::StepStateInputDebug {
-                path: input.path.clone(),
-                exclude: input.exclude.clone(),
+                path: input.path,
+                exclude: input.exclude,
                 hash: input_hash,
             });
         }
+        None => {}
     }
     Ok(ComputedStepState {
         key: hex::encode(hasher.finalize()),
@@ -498,7 +524,7 @@ pub(crate) fn compute_step_state_key(
     step: &Step,
     snapshot_rootfs: &Path,
 ) -> Result<String> {
-    Ok(compute_step_state(previous_state_key, pipeline, step, snapshot_rootfs)?.key)
+    Ok(compute_step_state(previous_state_key, pipeline, step, snapshot_rootfs, true)?.key)
 }
 
 fn hash_context_run_mount_source(pipeline: &Pipeline, source: &str) -> Result<String> {

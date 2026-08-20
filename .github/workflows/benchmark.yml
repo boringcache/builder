@@ -1,0 +1,77 @@
+name: Boringbuilder Benchmarks
+
+on:
+  schedule:
+    - cron: "23 5 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: boringbuilder-benchmarks
+  cancel-in-progress: false
+
+env:
+  BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+  BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+  CARGO_INCREMENTAL: "0"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  dockerfile:
+    name: Dockerfile cold and warm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable 2026-08-05
+        with:
+          toolchain: 1.94.1
+
+      - name: Build benchmark binary with BoringCache Cargo
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
+        with:
+          trust-policy: publish
+          setup: none
+          mode: cargo
+          fail-on-cache-error: true
+
+      - name: Measure cold and warm self-builds
+        run: |
+          sudo --preserve-env=GITHUB_SHA \
+            python3 scripts/benchmark.py \
+              --binary target/release/boringbuilder \
+              --dockerfile Dockerfile \
+              --platform linux/amd64 \
+              --output dist/benchmark
+          sudo chown -R "$(id -u):$(id -g)" dist
+
+      - name: Publish benchmark summary
+        run: cat dist/benchmark/benchmark.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Route reports through BoringCache
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
+        with:
+          trust-policy: publish
+          setup: none
+          mode: gha
+          fail-on-cache-error: true
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: boringbuilder-benchmark
+          path: |
+            dist/benchmark/benchmark.json
+            dist/benchmark/benchmark.md
+            dist/benchmark/*-timings.json
+            dist/benchmark/*-resources.txt
+          if-no-files-found: error
+          retention-days: 90

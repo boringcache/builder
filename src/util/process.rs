@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -34,7 +35,15 @@ pub fn find_command(binary: &str) -> Option<PathBuf> {
 }
 
 pub fn run_capture(program: &Path, args: &[String]) -> Result<CommandOutput> {
-    let output = run_command_output(program, args)
+    run_capture_with_env(program, args, &[])
+}
+
+pub fn run_capture_with_env(
+    program: &Path,
+    args: &[String],
+    env: &[(&str, &OsStr)],
+) -> Result<CommandOutput> {
+    let output = run_command_output(program, args, env)
         .with_context(|| format!("failed to run {}", display_command(program, args)))?;
 
     Ok(CommandOutput {
@@ -251,8 +260,17 @@ pub fn display_command(program: &Path, args: &[String]) -> String {
     }
 }
 
-fn run_command_output(program: &Path, args: &[String]) -> std::io::Result<std::process::Output> {
-    with_exec_busy_retry(|| Command::new(program).args(args).output())
+fn run_command_output(
+    program: &Path,
+    args: &[String],
+    env: &[(&str, &OsStr)],
+) -> std::io::Result<std::process::Output> {
+    with_exec_busy_retry(|| {
+        Command::new(program)
+            .args(args)
+            .envs(env.iter().copied())
+            .output()
+    })
 }
 
 fn run_command_status<F>(
@@ -369,7 +387,10 @@ fn stream_with_prefix<R: std::io::Read>(
 mod tests {
     use std::path::Path;
 
-    use super::{StreamSource, display_command, render_stream_line, should_retry_exec_busy};
+    use super::{
+        StreamSource, display_command, render_stream_line, should_retry_exec_busy,
+        with_exec_busy_retry,
+    };
 
     #[test]
     fn display_command_quotes_args() {
@@ -424,7 +445,21 @@ mod tests {
 
     #[test]
     fn retries_executable_file_busy_errors() {
-        let error = std::io::Error::from_raw_os_error(26);
-        assert!(should_retry_exec_busy(&error));
+        let mut attempts = 0;
+        let result = with_exec_busy_retry(|| {
+            attempts += 1;
+            if attempts < 3 {
+                Err(std::io::Error::from_raw_os_error(26))
+            } else {
+                Ok("started")
+            }
+        })
+        .unwrap();
+
+        assert_eq!(result, "started");
+        assert_eq!(attempts, 3);
+        assert!(should_retry_exec_busy(&std::io::Error::from_raw_os_error(
+            26
+        )));
     }
 }
