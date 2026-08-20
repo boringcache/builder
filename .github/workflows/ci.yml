@@ -27,12 +27,6 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Harden the runner
-        if: github.event.repository.visibility == 'public'
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
-        with:
-          egress-policy: audit
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -84,12 +78,6 @@ jobs:
           - 5000:5000
 
     steps:
-      - name: Harden the runner
-        if: github.event.repository.visibility == 'public'
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
-        with:
-          egress-policy: audit
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -111,7 +99,7 @@ jobs:
       - name: Build release binary with BoringCache Cargo
         run: boringcache cargo build --locked --release
 
-      - name: Build and push boringbuilder with boringbuilder
+      - name: Build, push, and warm-rebuild with boringbuilder
         shell: bash
         run: |
           mkdir -p dist/dogfood
@@ -130,12 +118,32 @@ jobs:
               --cache boringcache \
               --cache-workspace boringcache/boringbuilder \
               --cache-bin "$boringcache_bin" \
-              --timings-json dist/dogfood/timings.json \
+              --timings-json dist/dogfood/seed-timings.json \
               --push "localhost:5000/boringbuilder/self:$GITHUB_SHA" \
               --insecure
+          sudo env \
+            BORINGCACHE_RESTORE_TOKEN="$BORINGCACHE_RESTORE_TOKEN" \
+            BORINGCACHE_SAVE_TOKEN="$BORINGCACHE_SAVE_TOKEN" \
+            HOME="$HOME" \
+            PATH="$PATH" \
+            target/release/boringbuilder build \
+              -f Dockerfile \
+              --platform linux/amd64 \
+              --format oci \
+              -o dist/dogfood/warm-image.oci \
+              --cache boringcache \
+              --cache-workspace boringcache/boringbuilder \
+              --cache-bin "$boringcache_bin" \
+              --timings-json dist/dogfood/warm-timings.json
           sudo chown -R "$(id -u):$(id -g)" dist
           test -f dist/dogfood/image.oci/oci-layout
           test -f dist/dogfood/image.oci/index.json
+          test -f dist/dogfood/warm-image.oci/oci-layout
+          python3 scripts/verify_warm_build.py \
+            --seed-timings dist/dogfood/seed-timings.json \
+            --warm-timings dist/dogfood/warm-timings.json \
+            --seed-index dist/dogfood/image.oci/index.json \
+            --warm-index dist/dogfood/warm-image.oci/index.json
 
       - name: Pull and verify the registry image without Docker
         run: >-
@@ -160,7 +168,10 @@ jobs:
           path: |
             dist/dogfood/image.oci/oci-layout
             dist/dogfood/image.oci/index.json
-            dist/dogfood/timings.json
+            dist/dogfood/warm-image.oci/oci-layout
+            dist/dogfood/warm-image.oci/index.json
+            dist/dogfood/seed-timings.json
+            dist/dogfood/warm-timings.json
             dist/dogfood/registry-roundtrip.json
           if-no-files-found: error
           retention-days: 14

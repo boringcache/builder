@@ -78,7 +78,8 @@ for Dockerfile or recipe variables.
 
 ## Cache expensive work
 
-Local caching is on by default:
+Local caching is on by default for recipe steps and Dockerfile `RUN`
+instructions:
 
 ```sh
 boringbuilder build
@@ -110,10 +111,11 @@ Build-time execution is part of the builder; remote job orchestration is not.
 ## CI and releases
 
 CI formats, lints, and tests the Rust project, then uses boringbuilder to build
-its own Dockerfile, export OCI, push to a disposable registry, and pull every
-blob back through the Registry API without Docker. Security CI runs RustSec,
-license and source policy, and zizmor. Dependency review, CodeQL for Rust and
-Actions, and OpenSSF Scorecard activate when the repository becomes public.
+its own Dockerfile twice, prove a warm cache hit with an identical image digest,
+export OCI, push to a disposable registry, and pull every blob back through the
+Registry API without Docker. Security CI runs RustSec, license and source
+policy, and zizmor. Dependency review, CodeQL for Rust and Actions, and OpenSSF
+Scorecard activate when the repository becomes public.
 Dependabot maintains Cargo and workflow dependencies, and a scheduled workflow
 records cold/warm wall time, peak memory, cache hits, and output digests.
 

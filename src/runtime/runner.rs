@@ -77,10 +77,9 @@ fn should_use_step_slices(backend: &dyn ExecutionBackend, pipeline: &Pipeline) -
 }
 
 fn pipeline_uses_step_slices(pipeline: &Pipeline) -> bool {
-    pipeline
-        .operations
-        .iter()
-        .any(|operation| matches!(operation, Operation::Exec(step) if step.tag.is_some()))
+    pipeline.operations.iter().any(
+        |operation| matches!(operation, Operation::Exec(step) if step.build_cache != Some(false)),
+    )
 }
 
 fn host_backend_has_writable_mounts(backend_name: &str, pipeline: &Pipeline) -> bool {
@@ -703,6 +702,13 @@ mod tests {
     };
 
     use super::{PreparedCaches, RunConfig, run_multi_target_recipe, run_pipeline};
+
+    fn test_run_config(root: &Path) -> RunConfig {
+        RunConfig {
+            cache_dir: Some(root.join("cache")),
+            ..RunConfig::default()
+        }
+    }
 
     struct ManifestOnlyBackend {
         manifest: CacheManifest,
@@ -1816,7 +1822,7 @@ mod tests {
             &backend,
             &multi,
             &RunOptions::default(),
-            &RunConfig::default(),
+            &test_run_config(temp.path()),
         )
         .unwrap();
 
@@ -1834,7 +1840,7 @@ mod tests {
     }
 
     #[test]
-    fn tagged_pipeline_still_uses_cache_hooks() {
+    fn untagged_pipeline_uses_automatic_cache_hooks() {
         let backend = RecordingBackend::new();
         let temp = tempdir().unwrap();
         let pipeline = Pipeline {
@@ -1855,7 +1861,7 @@ mod tests {
                 shell: None,
                 build_cache_inputs: None,
                 build_cache: None,
-                tag: Some("shared-runtime-tools".to_string()),
+                tag: None,
             })],
             export: None,
             metadata: None,
@@ -1912,7 +1918,7 @@ mod tests {
             &backend,
             &pipeline,
             &RunOptions::default(),
-            &RunConfig::default(),
+            &test_run_config(temp.path()),
         )
         .unwrap();
 
@@ -1959,7 +1965,7 @@ mod tests {
             docker_context: None,
         };
 
-        let config = RunConfig::default();
+        let config = test_run_config(temp.path());
         run_pipeline(&backend, &pipeline, &RunOptions::default(), &config).unwrap();
 
         assert_eq!(backend.seen_cache_hooks.lock().unwrap().as_slice(), &[true]);
@@ -2002,7 +2008,7 @@ mod tests {
             docker_context: None,
         };
 
-        let config = RunConfig::default();
+        let config = test_run_config(temp.path());
         run_pipeline(&backend, &pipeline, &RunOptions::default(), &config).unwrap();
 
         assert_eq!(
@@ -2137,7 +2143,7 @@ mod tests {
                 export_format_override: Some(crate::schema::ExportFormat::Oci),
                 ..RunOptions::default()
             },
-            &RunConfig::default(),
+            &test_run_config(temp.path()),
         )
         .unwrap();
 
@@ -2233,7 +2239,7 @@ mod tests {
             &backend,
             &multi,
             &RunOptions::default(),
-            &RunConfig::default(),
+            &test_run_config(temp.path()),
         )
         .unwrap();
 
@@ -2329,7 +2335,7 @@ mod tests {
             &backend,
             &multi,
             &RunOptions::default(),
-            &RunConfig::default(),
+            &test_run_config(temp.path()),
         )
         .unwrap();
 
