@@ -1,0 +1,19 @@
+targets:
+  build:
+    image: alpine:3.21
+    steps:
+      - run: mkdir -p /out && printf 'application\n' > /out/app
+    outputs:
+      - /out
+
+  package:
+    image: alpine:3.21
+    needs:
+      - build
+    steps:
+      - run: cp /boringbuilder-stages/build/out/app /package
+    outputs:
+      - /package
+    export:
+      format: tar.zst
+      path: ./dist/application.tar.zst

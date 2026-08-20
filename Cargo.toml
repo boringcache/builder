@@ -1,0 +1,39 @@
+[package]
+name = "boringbuilder"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+description = "Fast native artifact and OCI image builder"
+license = "MIT"
+repository = "https://github.com/boringcache/builder"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+ctrlc = "3.5"
+fs2 = "0.4"
+flate2 = "1.1"
+globset = "0.4"
+hex = "0.4"
+ignore = "0.4"
+indexmap = { version = "2", features = ["serde"] }
+nix = { version = "0.31", features = ["user"] }
+oci-client = { version = "0.17", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+yaml_serde = "0.10"
+sha2 = "0.11"
+shell-words = "1.1"
+tar = "0.4"
+tempfile = "3.23"
+time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
+tokio = { version = "1", features = ["rt"] }
+walkdir = "2.5"
+xattr = "1.6"
+zstd = { version = "0.13", features = ["zstdmt"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

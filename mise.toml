@@ -1,0 +1,42 @@
+[tools]
+rust = "1.94.1"
+
+[tasks.build]
+description = "Build boringbuilder"
+run = "cargo build"
+
+[tasks."build-release"]
+description = "Build boringbuilder in release mode"
+run = "cargo build --release"
+
+[tasks.check]
+description = "Run cargo check"
+run = "cargo check"
+
+[tasks.test]
+description = "Run cargo test"
+run = "cargo test"
+
+[tasks.clippy]
+description = "Run cargo clippy"
+run = "cargo clippy --all-targets -- -D warnings"
+
+[tasks.fmt]
+description = "Run rustfmt"
+run = "cargo fmt --all"
+
+[tasks."fmt-check"]
+description = "Check rustfmt formatting"
+run = "cargo fmt --all --check"
+
+[tasks.verify]
+description = "Run fmt-check, clippy, and test"
+depends = ["fmt-check", "clippy", "test"]
+
+[tasks.plan]
+description = "Resolve the example build without running it"
+run = "cargo run -- build -f examples/artifact.yml --dry-run"
+
+[tasks.bb]
+description = "Run boringbuilder via cargo"
+run = "cargo run --"

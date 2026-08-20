@@ -1,0 +1,32 @@
+workspace = "boringcache/boringbuilder"
+
+[entries.cargo-registry-cache]
+tag = "cargo-registry-cache-rust-1.94.1"
+
+[entries.cargo-registry-index]
+tag = "cargo-registry-index-rust-1.94.1"
+
+[entries.cargo-git-db]
+tag = "cargo-git-db-rust-1.94.1"
+
+[entries.cargo-target]
+kind = "cargo-target"
+tag = "cargo-target-rust-1.94.1"
+path = "target"
+
+[profiles.cargo-deps]
+entries = ["cargo-registry-cache", "cargo-registry-index", "cargo-git-db"]
+
+[profiles.cargo]
+entries = ["cargo-registry-cache", "cargo-registry-index", "cargo-git-db", "cargo-target"]
+
+[adapters.sccache]
+tag = "rust-compiler-1.94.1"
+command = ["cargo", "test", "--locked", "--all-targets"]
+no-git = true
+sccache-key-prefix = "boringbuilder/rust"
+
+[adapters.cargo]
+profiles = ["cargo"]
+command = ["cargo", "test", "--locked", "--all-targets"]
+compiler-cache = "sccache"

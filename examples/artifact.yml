@@ -1,0 +1,21 @@
+image: alpine:3.21
+platform: linux/amd64
+workdir: /src
+
+inputs:
+  - source: .
+    dest: /src
+    readonly: true
+
+steps:
+  - name: package
+    run: |
+      mkdir -p /out
+      printf 'hello from boringbuilder\n' > /out/hello.txt
+
+outputs:
+  - /out
+
+export:
+  format: tar.zst
+  path: ./dist/hello.tar.zst
