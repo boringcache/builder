@@ -157,7 +157,7 @@ fn hash_step_state_field(hasher: &mut Sha256, label: &str, value: impl AsRef<[u8
 
 pub(crate) fn initial_step_state_key(pipeline: &Pipeline) -> String {
     let mut hasher = Sha256::new();
-    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v4");
+    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v5");
     hash_step_state_field(&mut hasher, "image", pipeline.image.as_bytes());
     hash_step_state_field(&mut hasher, "platform", pipeline.platform.as_bytes());
     hash_step_state_field(&mut hasher, "workdir", pipeline.workdir.as_bytes());
@@ -311,7 +311,7 @@ pub(crate) fn compute_step_state(
 ) -> Result<ComputedStepState> {
     let mut hasher = Sha256::new();
     let mut input_debug = Vec::new();
-    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v4");
+    hash_step_state_field(&mut hasher, "version", "boringbuilder-step-state-v5");
     hash_step_state_field(&mut hasher, "previous", previous_state_key.as_bytes());
     if let Some(argv) = &step.run_exec {
         hash_step_state_field(&mut hasher, "run-mode", b"exec");

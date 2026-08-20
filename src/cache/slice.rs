@@ -73,6 +73,10 @@ pub struct StepStateInputDebug {
 pub struct FileMeta {
     size: u64,
     mtime_ns: u64,
+    // ctime catches in-place content changes when a tool restores the original
+    // size and mtime (package managers commonly do this from archive metadata).
+    // It is intentionally used for same-run diffing only, not stable cache keys.
+    ctime_ns: u64,
     mode: u32,
     uid: u32,
     gid: u32,
@@ -121,12 +125,16 @@ pub fn snapshot_metadata(root: &Path) -> Result<FsSnapshot> {
         let mtime_ns = (metadata.mtime() as u64)
             .saturating_mul(1_000_000_000)
             .saturating_add(metadata.mtime_nsec() as u64);
+        let ctime_ns = (metadata.ctime() as u64)
+            .saturating_mul(1_000_000_000)
+            .saturating_add(metadata.ctime_nsec() as u64);
 
         state.insert(
             relative,
             FileMeta {
                 size: metadata.len(),
                 mtime_ns,
+                ctime_ns,
                 mode: metadata.permissions().mode() & 0o7777,
                 uid: metadata.uid(),
                 gid: metadata.gid(),
@@ -522,11 +530,34 @@ mod tests {
     }
 
     #[test]
+    fn diff_detects_same_size_content_changes_with_restored_mtime() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("same-metadata.txt");
+        fs::write(&path, "before").unwrap();
+        let original_mtime = fs::metadata(&path).unwrap().modified().unwrap();
+        let before = snapshot_metadata(tmp.path()).unwrap();
+
+        fs::write(&path, "after!").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(original_mtime))
+            .unwrap();
+
+        let after = snapshot_metadata(tmp.path()).unwrap();
+        let (changed, deleted) = diff_snapshots(&before, &after);
+        assert_eq!(changed, vec![PathBuf::from("same-metadata.txt")]);
+        assert!(deleted.is_empty());
+    }
+
+    #[test]
     fn diff_detects_ownership_changes() {
         let path = PathBuf::from("owned.txt");
         let original = FileMeta {
             size: 4,
             mtime_ns: 0,
+            ctime_ns: 0,
             mode: 0o644,
             uid: 0,
             gid: 0,
