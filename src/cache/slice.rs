@@ -74,6 +74,8 @@ pub struct FileMeta {
     size: u64,
     mtime_ns: u64,
     mode: u32,
+    uid: u32,
+    gid: u32,
     is_dir: bool,
     is_symlink: bool,
 }
@@ -93,7 +95,7 @@ fn is_step_slice_ignored_path(root: &Path, path: &Path) -> bool {
 }
 
 /// Take a fast metadata snapshot of a directory tree.
-/// Only records path + mtime + size + mode — does NOT read file contents.
+/// Records path, timestamps, size, mode, and ownership without reading contents.
 pub fn snapshot_metadata(root: &Path) -> Result<FsSnapshot> {
     let mut state = BTreeMap::new();
     if !root.exists() {
@@ -126,6 +128,8 @@ pub fn snapshot_metadata(root: &Path) -> Result<FsSnapshot> {
                 size: metadata.len(),
                 mtime_ns,
                 mode: metadata.permissions().mode() & 0o7777,
+                uid: metadata.uid(),
+                gid: metadata.gid(),
                 is_dir: metadata.is_dir(),
                 is_symlink: metadata.file_type().is_symlink(),
             },
@@ -170,6 +174,8 @@ pub fn snapshot_fingerprint(snapshot: &FsSnapshot) -> String {
         hasher.update(meta.size.to_le_bytes());
         hasher.update(meta.mtime_ns.to_le_bytes());
         hasher.update(meta.mode.to_le_bytes());
+        hasher.update(meta.uid.to_le_bytes());
+        hasher.update(meta.gid.to_le_bytes());
         hasher.update([meta.is_dir as u8, meta.is_symlink as u8]);
         hasher.update(b"\0");
     }
@@ -513,6 +519,30 @@ mod tests {
         assert!(changed.contains(&PathBuf::from("new.txt")));
         assert!(!changed.contains(&PathBuf::from("keep.txt")));
         assert_eq!(deleted, vec![PathBuf::from("delete.txt")]);
+    }
+
+    #[test]
+    fn diff_detects_ownership_changes() {
+        let path = PathBuf::from("owned.txt");
+        let original = FileMeta {
+            size: 4,
+            mtime_ns: 0,
+            mode: 0o644,
+            uid: 0,
+            gid: 0,
+            is_dir: false,
+            is_symlink: false,
+        };
+        let mut before = BTreeMap::new();
+        before.insert(path.clone(), original.clone());
+
+        let mut after = before.clone();
+        after.get_mut(&path).unwrap().uid = 1000;
+        assert_eq!(diff_snapshots(&before, &after).0, vec![path.clone()]);
+
+        after.insert(path.clone(), original);
+        after.get_mut(&path).unwrap().gid = 1000;
+        assert_eq!(diff_snapshots(&before, &after).0, vec![path]);
     }
 
     #[test]
