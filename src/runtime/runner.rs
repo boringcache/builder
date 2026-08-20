@@ -56,9 +56,19 @@ pub fn run_pipeline(
         use_step_slices,
     )?;
     let run_pipeline = prepared.pipeline.clone();
-    let result = backend.run(&run_pipeline, options, config, Some(&mut prepared));
+    let mut result = backend.run(&run_pipeline, options, config, Some(&mut prepared));
+    if let Ok(summary) = result.as_mut() {
+        merge_step_slice_metrics(&mut summary.timings, &prepared.step_slice_stats);
+    }
     prepared.emit_step_slice_summary();
     result
+}
+
+fn merge_step_slice_metrics(timings: &mut RunTimings, stats: &StepSliceStats) {
+    timings.cache.hit_count += stats.restore_hits;
+    timings.cache.miss_count +=
+        stats.restore_misses + stats.restore_mismatches + stats.restore_failures;
+    timings.cache.save_count += stats.saves;
 }
 
 fn should_use_step_slices(backend: &dyn ExecutionBackend, pipeline: &Pipeline) -> bool {
@@ -684,7 +694,7 @@ mod tests {
     use tempfile::{TempDir, tempdir};
 
     use crate::backend::{
-        ExecutionBackend, OperationCacheHooks, RunOptions, RunSummary, RunTimings,
+        CacheMetrics, ExecutionBackend, OperationCacheHooks, RunOptions, RunSummary, RunTimings,
     };
     use crate::cache::CacheStore;
     use crate::cache::backend::{CacheBackend, CacheManifest, tree_cache_manifest};
@@ -701,13 +711,42 @@ mod tests {
         StepRunMount,
     };
 
-    use super::{PreparedCaches, RunConfig, run_multi_target_recipe, run_pipeline};
+    use super::{
+        PreparedCaches, RunConfig, merge_step_slice_metrics, run_multi_target_recipe, run_pipeline,
+    };
 
     fn test_run_config(root: &Path) -> RunConfig {
         RunConfig {
             cache_dir: Some(root.join("cache")),
             ..RunConfig::default()
         }
+    }
+
+    #[test]
+    fn step_slice_activity_is_included_in_run_cache_metrics() {
+        let mut timings = RunTimings {
+            cache: CacheMetrics {
+                hit_count: 1,
+                miss_count: 2,
+                save_count: 3,
+                ..CacheMetrics::default()
+            },
+            ..RunTimings::default()
+        };
+        let stats = StepSliceStats {
+            restore_hits: 2,
+            restore_misses: 3,
+            restore_mismatches: 4,
+            restore_failures: 5,
+            saves: 6,
+            ..StepSliceStats::default()
+        };
+
+        merge_step_slice_metrics(&mut timings, &stats);
+
+        assert_eq!(timings.cache.hit_count, 3);
+        assert_eq!(timings.cache.miss_count, 14);
+        assert_eq!(timings.cache.save_count, 9);
     }
 
     struct ManifestOnlyBackend {
