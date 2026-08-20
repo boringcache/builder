@@ -28,6 +28,7 @@ jobs:
 
     steps:
       - name: Harden the runner
+        if: github.event.repository.visibility == 'public'
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
@@ -94,6 +95,7 @@ jobs:
 
     steps:
       - name: Harden the runner
+        if: github.event.repository.visibility == 'public'
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
@@ -110,9 +112,8 @@ jobs:
           components: clippy,rustfmt
 
       - name: Test with BoringCache Cargo
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
         with:
-          cli-version: v1.19.5
           trust-policy: publish
           setup: none
           mode: cargo
@@ -161,6 +162,7 @@ jobs:
 
     steps:
       - name: Harden the runner
+        if: github.event.repository.visibility == 'public'
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
@@ -177,9 +179,8 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Test with BoringCache Cargo
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
         with:
-          cli-version: v1.19.5
           trust-policy: publish
           setup: none
           mode: cargo
@@ -201,9 +202,8 @@ jobs:
           subject-path: boringbuilder-${{ matrix.name }}
 
       - name: Route artifacts through BoringCache
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
         with:
-          cli-version: v1.19.5
           trust-policy: publish
           setup: none
           mode: gha
@@ -229,6 +229,7 @@ jobs:
 
     steps:
       - name: Harden the runner
+        if: github.event.repository.visibility == 'public'
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
@@ -239,9 +240,8 @@ jobs:
           persist-credentials: false
 
       - name: Route artifacts through BoringCache
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
         with:
-          cli-version: v1.19.5
           trust-policy: restore
           setup: none
           mode: gha

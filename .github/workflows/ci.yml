@@ -28,6 +28,7 @@ jobs:
 
     steps:
       - name: Harden the runner
+        if: github.event.repository.visibility == 'public'
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
@@ -47,9 +48,8 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Test with BoringCache Cargo
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
         with:
-          cli-version: v1.19.5
           trust-policy: auto
           setup: none
           mode: cargo
@@ -85,6 +85,7 @@ jobs:
 
     steps:
       - name: Harden the runner
+        if: github.event.repository.visibility == 'public'
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
@@ -100,9 +101,8 @@ jobs:
           toolchain: 1.94.1
 
       - name: Test with BoringCache Cargo
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
         with:
-          cli-version: v1.19.5
           trust-policy: publish
           setup: none
           mode: cargo
@@ -146,9 +146,8 @@ jobs:
           --output dist/dogfood/registry-roundtrip.json
 
       - name: Route evidence through BoringCache
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
         with:
-          cli-version: v1.19.5
           trust-policy: publish
           setup: none
           mode: gha
