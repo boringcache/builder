@@ -127,7 +127,7 @@ the same pipeline.
 
 ## Develop
 
-Rust 1.94.1 is pinned in `mise.toml`.
+Rust 1.98.0 is pinned in `mise.toml`.
 
 ```sh
 mise install
