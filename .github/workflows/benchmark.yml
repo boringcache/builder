@@ -35,16 +35,13 @@ jobs:
         with:
           toolchain: 1.94.1
 
-      - name: Test with BoringCache Cargo
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
+      - name: Build benchmark binary with BoringCache Cargo
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
         with:
           trust-policy: publish
           setup: none
           mode: cargo
           fail-on-cache-error: true
-
-      - name: Build benchmark binary with BoringCache Cargo
-        run: boringcache cargo build --locked --release
 
       - name: Measure cold and warm self-builds
         run: |
@@ -60,7 +57,7 @@ jobs:
         run: cat dist/benchmark/benchmark.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Route reports through BoringCache
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
         with:
           trust-policy: publish
           setup: none

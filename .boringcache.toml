@@ -6,19 +6,13 @@ tag = "cargo-registry-cache"
 [entries.cargo-registry-index]
 tag = "cargo-registry-index"
 
-[entries.cargo-git-db]
-tag = "cargo-git-db"
-
 [entries.cargo-target]
 kind = "cargo-target"
 tag = "cargo-target"
 path = "target"
 
-[profiles.cargo-deps]
-entries = ["cargo-registry-cache", "cargo-registry-index", "cargo-git-db"]
-
 [profiles.cargo]
-entries = ["cargo-registry-cache", "cargo-registry-index", "cargo-git-db", "cargo-target"]
+entries = ["cargo-registry-cache", "cargo-registry-index", "cargo-target"]
 
 [adapters.sccache]
 tag = "rust-compiler"
@@ -27,6 +21,6 @@ sccache-key-prefix = "boringbuilder/rust"
 
 [adapters.cargo]
 profiles = ["cargo"]
-command = ["cargo", "test", "--locked", "--all-targets"]
+command = ["cargo", "build", "--locked", "--release"]
 compiler-cache = "sccache"
 metadata-hints = ["project=boringbuilder"]

@@ -41,16 +41,19 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
-      - name: Test with BoringCache Cargo
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
+      - name: Set up BoringCache compiler cache
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
         with:
           trust-policy: auto
           setup: none
-          mode: cargo
+          mode: sccache
           fail-on-cache-error: ${{ github.event_name != 'pull_request' }}
 
-      - name: Run Clippy with BoringCache Cargo
-        run: boringcache cargo clippy --locked --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked --all-targets
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Verify artifact recipe
         run: cargo run --locked -- build -f examples/artifact.yml --dry-run
@@ -88,16 +91,13 @@ jobs:
         with:
           toolchain: 1.94.1
 
-      - name: Test with BoringCache Cargo
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
+      - name: Build release binary with BoringCache Cargo
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
         with:
           trust-policy: publish
           setup: none
           mode: cargo
           fail-on-cache-error: true
-
-      - name: Build release binary with BoringCache Cargo
-        run: boringcache cargo build --locked --release
 
       - name: Build, push, and warm-rebuild with boringbuilder
         shell: bash
@@ -154,7 +154,7 @@ jobs:
           --output dist/dogfood/registry-roundtrip.json
 
       - name: Route evidence through BoringCache
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.4
+        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
         with:
           trust-policy: publish
           setup: none

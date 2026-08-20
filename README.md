@@ -95,9 +95,9 @@ boringbuilder build \
   --cache-workspace acme/project
 ```
 
-This repository uses the same integration for its Cargo builds, self-build,
-CI evidence, benchmarks, and release artifacts. BoringCache Cargo coordinates
-dependency and target snapshots with sccache compiler outputs as one lifecycle.
+This repository dogfoods both cache layers. Multi-command validation jobs use
+one BoringCache-managed sccache session. Release, benchmark, and self-build jobs
+use one BoringCache Cargo lifecycle for registry, target, and compiler caches.
 
 ## How builds run
 
