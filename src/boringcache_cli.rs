@@ -1,10 +1,9 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 
-use crate::util::process::{CommandOutput, display_command, find_command};
+use crate::util::process::{CommandOutput, find_command, run_capture_with_env};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoringCachePlatformScope {
@@ -108,21 +107,14 @@ impl BoringCacheCli {
     }
 
     pub fn run_capture(&self, args: &[String]) -> Result<CommandOutput> {
-        let mut command = Command::new(self.binary());
-        command.args(args);
-        if let Some(token) = fallback_boringcache_api_token_from_lookup(|name| {
+        let token = fallback_boringcache_api_token_from_lookup(|name| {
             std::env::var_os(name).filter(|value| !value.is_empty())
-        }) {
-            command.env("BORINGCACHE_API_TOKEN", token);
-        }
-        let output = command
-            .output()
-            .with_context(|| format!("failed to run {}", display_command(self.binary(), args)))?;
-        Ok(CommandOutput {
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            status: output.status,
-        })
+        });
+        let env = token
+            .as_deref()
+            .map(|token| [("BORINGCACHE_API_TOKEN", token)])
+            .unwrap_or_default();
+        run_capture_with_env(self.binary(), args, &env)
     }
 
     pub fn supports_cache_registry(&self) -> Result<bool> {

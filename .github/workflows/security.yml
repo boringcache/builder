@@ -66,7 +66,7 @@ jobs:
       - name: Install audited security tools
         uses: taiki-e/install-action@a2a5f6e99e1a31540baa0468acfa302cff0f359f # v2.86.4
         with:
-          tool: cargo-audit@0.22.2,cargo-deny@0.20.2,cargo-machete@0.9.2,ruff@0.16.3,zizmor@1.29.0
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2,cargo-machete@0.9.2,zizmor@1.29.0
           fallback: none
 
       - name: Reject vulnerable, unmaintained, unsound, or yanked dependencies
@@ -81,9 +81,14 @@ jobs:
       - name: Audit GitHub Actions
         run: zizmor .github/workflows
 
+      - name: Lint Python scripts
+        uses: astral-sh/ruff-action@278981a28ce3188b1e39527901f38254bf3aac89 # v4.1.0
+        with:
+          version: 0.16.3
+          args: check scripts
+
       - name: Check repository scripts
         run: |
-          ruff check scripts
           ruff format --check scripts
           python3 -m py_compile scripts/*.py
           shellcheck install.sh
