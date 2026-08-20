@@ -14,8 +14,6 @@ permissions:
   contents: read
 
 env:
-  BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-  BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
   CARGO_INCREMENTAL: "0"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -29,6 +27,17 @@ jobs:
       prerelease: ${{ steps.release.outputs.prerelease }}
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Validate version and source
         id: release
         env:
@@ -52,6 +61,20 @@ jobs:
             exit 1
           fi
 
+          package_version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [[ "$version" != "v$package_version" ]]; then
+            echo "Release $version does not match Cargo package version v$package_version." >&2
+            exit 1
+          fi
+
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+              echo "Release tags must point to a commit on main." >&2
+              exit 1
+            fi
+            git verify-tag "$version"
+          fi
+
           prerelease=false
           if [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
             prerelease=true
@@ -65,10 +88,20 @@ jobs:
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable 2026-08-05
@@ -76,34 +109,26 @@ jobs:
           toolchain: 1.94.1
           components: clippy,rustfmt
 
-      - name: Restore Cargo archives with BoringCache
+      - name: Test with BoringCache Cargo
         uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
         with:
+          cli-version: v1.19.5
           trust-policy: publish
           setup: none
-          mode: archive
-          cache-profiles: cargo
-          fail-on-cache-error: true
-
-      - name: Enable BoringCache compiler cache
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
-        with:
-          trust-policy: publish
-          setup: none
-          mode: sccache
+          mode: cargo
           fail-on-cache-error: true
 
       - name: Check formatting
         run: cargo fmt --all --check
 
       - name: Run Clippy
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      - name: Run tests
-        run: cargo test --locked --all-targets
+        run: boringcache cargo clippy --locked --all-targets -- -D warnings
 
       - name: Install cargo-audit
-        run: cargo install --locked cargo-audit --version 0.22.2
+        uses: taiki-e/install-action@a2a5f6e99e1a31540baa0468acfa302cff0f359f # v2.86.4
+        with:
+          tool: cargo-audit@0.22.2
+          fallback: none
 
       - name: Audit dependencies
         run: cargo audit --deny warnings
@@ -113,6 +138,13 @@ jobs:
     needs: [validate, verify]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    env:
+      BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -128,8 +160,15 @@ jobs:
             target: aarch64-apple-darwin
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable 2026-08-05
@@ -137,25 +176,17 @@ jobs:
           toolchain: 1.94.1
           targets: ${{ matrix.target }}
 
-      - name: Restore Cargo archives with BoringCache
+      - name: Test with BoringCache Cargo
         uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
         with:
+          cli-version: v1.19.5
           trust-policy: publish
           setup: none
-          mode: archive
-          cache-profiles: cargo
+          mode: cargo
           fail-on-cache-error: true
 
-      - name: Enable BoringCache compiler cache
-        uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
-        with:
-          trust-policy: publish
-          setup: none
-          mode: sccache
-          fail-on-cache-error: true
-
-      - name: Build release binary
-        run: cargo build --locked --release --target "${{ matrix.target }}"
+      - name: Build release binary with BoringCache Cargo
+        run: boringcache cargo build --locked --release --target "${{ matrix.target }}"
 
       - name: Package binary
         shell: bash
@@ -163,9 +194,16 @@ jobs:
           cp "target/${{ matrix.target }}/release/boringbuilder" "boringbuilder-${{ matrix.name }}"
           chmod +x "boringbuilder-${{ matrix.name }}"
 
+      - name: Attest release binary
+        if: github.event.repository.visibility == 'public'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: boringbuilder-${{ matrix.name }}
+
       - name: Route artifacts through BoringCache
         uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
         with:
+          cli-version: v1.19.5
           trust-policy: publish
           setup: none
           mode: gha
@@ -184,16 +222,26 @@ jobs:
     needs: [validate, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
     permissions:
       contents: write
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Route artifacts through BoringCache
         uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
         with:
+          cli-version: v1.19.5
           trust-policy: restore
           setup: none
           mode: gha
@@ -225,3 +273,12 @@ jobs:
             args+=(--target "$GITHUB_SHA")
           fi
           gh release create "$VERSION" boringbuilder-* SHA256SUMS "${args[@]}"
+
+      - name: Verify release installation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          install_dir="$RUNNER_TEMP/boringbuilder-bin"
+          BORINGBUILDER_INSTALL_DIR="$install_dir" ./install.sh --version "$VERSION"
+          test "$("$install_dir/boringbuilder" --version)" = "boringbuilder ${VERSION#v}"

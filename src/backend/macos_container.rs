@@ -2786,6 +2786,47 @@ fn export_container_archive_stream(
     kind: ArchiveExportKind,
     output_path: &Path,
 ) -> Result<PathBuf> {
+    const MAX_ATTEMPTS: usize = 3;
+
+    let mut last_err = None;
+    for attempt in 0..MAX_ATTEMPTS {
+        match export_container_archive_stream_once(
+            binary,
+            container_name,
+            pipeline,
+            kind,
+            output_path,
+        ) {
+            Ok(path) => return Ok(path),
+            Err(err) if archive_stream_error_is_retryable(&err) => {
+                last_err = Some(err);
+                if attempt + 1 < MAX_ATTEMPTS {
+                    eprintln!(
+                        "warning: container {} export was interrupted; retrying ({}/{MAX_ATTEMPTS})",
+                        kind.label(),
+                        attempt + 2
+                    );
+                    sleep(Duration::from_millis(750));
+                }
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| anyhow!("container archive export did not complete")))
+}
+
+fn archive_stream_error_is_retryable(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("export failed with status signal")
+}
+
+fn export_container_archive_stream_once(
+    binary: &Path,
+    container_name: &str,
+    pipeline: &Pipeline,
+    kind: ArchiveExportKind,
+    output_path: &Path,
+) -> Result<PathBuf> {
     ensure!(
         !pipeline.outputs.is_empty(),
         "container-native archive export needs declared outputs"
@@ -2833,8 +2874,6 @@ fn export_container_archive_stream(
     let status = child
         .wait()
         .with_context(|| format!("failed to wait for container {} export", kind.label()))?;
-    write_result.with_context(|| format!("failed to write {}", output_path.display()))?;
-
     if !status.success() {
         let _ = fs::remove_file(output_path);
         bail!(
@@ -2845,6 +2884,10 @@ fn export_container_archive_stream(
                 .map(|code| code.to_string())
                 .unwrap_or_else(|| "signal".to_string())
         );
+    }
+    if let Err(err) = write_result {
+        let _ = fs::remove_file(output_path);
+        return Err(err).with_context(|| format!("failed to write {}", output_path.display()));
     }
 
     Ok(output_path.to_path_buf())
@@ -3593,9 +3636,9 @@ mod tests {
         build_capture_local_slice_script, build_capture_slice_script,
         build_container_archive_export_script, build_container_hash_script,
         build_restore_boringcache_slice_script, cache_blob_tag, default_container_memory_arg,
-        dns_server_usable, dns_servers_from_env, export_container_as_oci_layout,
-        local_cache_blob_guest_path, normalize_tar_stream, parse_local_slice_capture_output,
-        parse_scutil_dns_servers, prefixed_container_exclude,
+        dns_server_usable, dns_servers_from_env, export_container_archive_stream,
+        export_container_as_oci_layout, local_cache_blob_guest_path, normalize_tar_stream,
+        parse_local_slice_capture_output, parse_scutil_dns_servers, prefixed_container_exclude,
         required_step_slice_restore_free_bytes, resolve_container_binary,
         resolved_container_memory_override, resolved_dns_servers, should_export_full_rootfs,
         stop_container_for_export, touch_slice_marker_script,
@@ -4085,6 +4128,74 @@ resolver #1
         let commands = fs::read_to_string(log).unwrap();
         assert_eq!(commands.lines().count(), 2);
         assert!(commands.contains("stop --time 0 demo"));
+    }
+
+    #[test]
+    fn retries_archive_stream_when_container_exec_is_signaled() {
+        use std::collections::BTreeMap;
+
+        use crate::schema::Pipeline;
+
+        let temp = tempdir().unwrap();
+        let fake = temp.path().join("container");
+        let count = temp.path().join("exec.count");
+        let fixture_root = temp.path().join("fixture");
+        fs::create_dir_all(&fixture_root).unwrap();
+        fs::write(fixture_root.join("hello.txt"), "hello\n").unwrap();
+        let fixture_tar = temp.path().join("fixture.tar");
+        let tar_file = fs::File::create(&fixture_tar).unwrap();
+        let mut builder = Builder::new(tar_file);
+        builder
+            .append_path_with_name(fixture_root.join("hello.txt"), "out/hello.txt")
+            .unwrap();
+        builder.finish().unwrap();
+
+        let script = format!(
+            "#!/bin/sh\nset -eu\ncount=0\nif [ -f {} ]; then count=$(cat {}); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > {}\ncat {}\nif [ \"$count\" -lt 2 ]; then kill -TERM $$; fi\n",
+            shell_words::quote(count.to_str().unwrap()),
+            shell_words::quote(count.to_str().unwrap()),
+            shell_words::quote(count.to_str().unwrap()),
+            shell_words::quote(fixture_tar.to_str().unwrap()),
+        );
+        fs::write(&fake, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&fake).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&fake, perms).unwrap();
+        }
+
+        let pipeline = Pipeline {
+            image: "alpine".to_string(),
+            platform: "linux/arm64".to_string(),
+            workdir: "/".to_string(),
+            env: BTreeMap::new(),
+            inputs: Vec::new(),
+            outputs: vec!["/out".to_string()],
+            setup_snapshot: None,
+            operations: Vec::new(),
+            export: None,
+            metadata: None,
+            base_dir: temp.path().to_path_buf(),
+            needs: Vec::new(),
+            stage_dependency_digests: BTreeMap::new(),
+            stage_snapshot_follow_symlinks: Default::default(),
+            docker_context: None,
+        };
+        let output = temp.path().join("output.tar");
+
+        export_container_archive_stream(&fake, "demo", &pipeline, ArchiveExportKind::Tar, &output)
+            .unwrap();
+
+        assert_eq!(fs::read_to_string(count).unwrap(), "2");
+        let mut archive = tar::Archive::new(fs::File::open(output).unwrap());
+        let paths = archive
+            .entries()
+            .unwrap()
+            .map(|entry| entry.unwrap().path().unwrap().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec![Path::new("out/hello.txt").to_path_buf()]);
     }
 
     #[test]

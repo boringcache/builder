@@ -54,8 +54,39 @@ fi
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/boringbuilder-install.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT HUP INT TERM
 
-curl -fsSL --retry 3 -o "$WORK_DIR/$ASSET" "$BASE_URL/$ASSET"
-curl -fsSL --retry 3 -o "$WORK_DIR/SHA256SUMS" "$BASE_URL/SHA256SUMS"
+download_with_curl() {
+  curl -fsSL --retry 3 -o "$WORK_DIR/$ASSET" "$BASE_URL/$ASSET" &&
+    curl -fsSL --retry 3 -o "$WORK_DIR/SHA256SUMS" "$BASE_URL/SHA256SUMS"
+}
+
+download_with_gh() {
+  command -v gh >/dev/null 2>&1 || return 1
+  if [ "$VERSION" = latest ]; then
+    gh release download \
+      --repo "$REPO" \
+      --pattern "$ASSET" \
+      --pattern SHA256SUMS \
+      --dir "$WORK_DIR" \
+      --clobber
+  else
+    gh release download "$VERSION" \
+      --repo "$REPO" \
+      --pattern "$ASSET" \
+      --pattern SHA256SUMS \
+      --dir "$WORK_DIR" \
+      --clobber
+  fi
+}
+
+if ! download_with_curl; then
+  rm -f "$WORK_DIR/$ASSET" "$WORK_DIR/SHA256SUMS"
+  if ! download_with_gh; then
+    printf '%s\n' \
+      'error: release download failed' \
+      'for a private repository, install and authenticate GitHub CLI first: gh auth login' >&2
+    exit 1
+  fi
+fi
 
 EXPECTED="$(awk -v asset="$ASSET" '$2 == asset { print $1 }' "$WORK_DIR/SHA256SUMS")"
 if [ -z "$EXPECTED" ]; then

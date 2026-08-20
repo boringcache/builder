@@ -1,0 +1,7 @@
+* @gauravtiwari
+
+# Workflow and release policy changes are security-sensitive.
+/.github/ @gauravtiwari
+/Cargo.lock @gauravtiwari
+/Cargo.toml @gauravtiwari
+/install.sh @gauravtiwari

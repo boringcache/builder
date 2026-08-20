@@ -9,3 +9,5 @@ vendor/bundle/
 .boringcache/
 .env*
 .boringbuilder/
+__pycache__/
+.ruff_cache/

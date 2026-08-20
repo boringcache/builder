@@ -1,68 +1,59 @@
 # boringbuilder
 
-`boringbuilder` is a fast, native artifact and OCI image builder. It executes a
-recipe or Dockerfile, caches the filesystem changes, and exports the result. It
-does not require Docker.
+[![CI](https://github.com/boringcache/builder/actions/workflows/ci.yml/badge.svg)](https://github.com/boringcache/builder/actions/workflows/ci.yml)
+[![Security](https://github.com/boringcache/builder/actions/workflows/security.yml/badge.svg)](https://github.com/boringcache/builder/actions/workflows/security.yml)
+[![CodeQL](https://github.com/boringcache/builder/actions/workflows/codeql.yml/badge.svg)](https://github.com/boringcache/builder/actions/workflows/codeql.yml)
+[![Benchmarks](https://github.com/boringcache/builder/actions/workflows/benchmark.yml/badge.svg)](https://github.com/boringcache/builder/actions/workflows/benchmark.yml)
+
+Fast native artifact and OCI image builds without Docker.
 
 ```sh
-cargo run --release -- build -f boringbuilder.yml --platform linux/arm64
+boringbuilder build -f Dockerfile --platform linux/arm64 --format oci -o dist/image.oci
 ```
 
-That is the product: source plus build instructions in, portable artifact or OCI
-image out.
+Source plus build instructions go in. A portable artifact or image comes out.
 
-## How it executes builds
+## Install the alpha
 
-- On macOS, Linux builds run with Apple Container. Native macOS recipes can opt
-  into `runtime: host`.
-- On Linux, builds use overlay mounts and chroot directly. Docker and a nested
-  container runtime are unnecessary. Chroot is an execution mechanism, not a
-  security boundary, so this backend is intended for trusted builds on
-  disposable or otherwise isolated machines.
-
-## Build an artifact
-
-```yaml
-# boringbuilder.yml
-image: alpine:3.21
-platform: linux/arm64
-workdir: /src
-
-inputs:
-  - source: .
-    dest: /src
-    readonly: true
-
-steps:
-  - name: package
-    run: |
-      mkdir -p /out
-      cp /src/my-app /out/my-app
-
-outputs:
-  - /out
-
-export:
-  format: tar.zst
-  path: ./dist/my-app-linux-arm64.tar.zst
-```
+The repository is private during the alpha, so installation uses your GitHub
+login:
 
 ```sh
-boringbuilder build
-boringbuilder build --platform linux/amd64
-boringbuilder build --dry-run
+gh auth status
+gh api repos/boringcache/builder/contents/install.sh \
+  -H 'Accept: application/vnd.github.raw+json' | \
+  sh -s -- --version v0.1.0-alpha.1
 ```
 
-## Build an OCI image from a Dockerfile
+The installer verifies the release checksum and puts `boringbuilder` in
+`~/.local/bin`. You can change that with `--install-dir`.
+
+To build from source instead:
+
+```sh
+gh repo clone boringcache/builder
+cd builder
+cargo install --locked --path .
+```
+
+## Build an image
+
+Use an ordinary Dockerfile:
+
+```dockerfile
+FROM alpine:3.21
+RUN printf 'hello from boringbuilder\n' > /hello.txt
+CMD ["cat", "/hello.txt"]
+```
 
 ```sh
 boringbuilder build -f Dockerfile \
   --platform linux/arm64 \
   --format oci \
-  -o ./dist/image.oci
+  -o dist/image.oci
 ```
 
-Push without Docker by naming the image directly:
+Push the result directly to a registry:
 
 ```sh
 boringbuilder build -f Dockerfile \
@@ -70,94 +61,67 @@ boringbuilder build -f Dockerfile \
   --push ghcr.io/acme/my-app:latest
 ```
 
-The supported exports are OCI layout, Docker archive, `tar.zst`, and tar.
-Use `--target NAME` for a multi-target recipe and `--build-arg KEY=VALUE` for
-Dockerfile or recipe variables.
+Docker is not used for either build. OCI layout, Docker archive, `tar.zst`,
+and tar exports are supported.
 
-```yaml
-targets:
-  compile:
-    image: alpine:3.21
-    steps:
-      - run: mkdir -p /out && cp /src/my-app /out/my-app
-    outputs: [/out]
+## Build an artifact
 
-  package:
-    image: alpine:3.21
-    needs: [compile]
-    steps:
-      - run: cp /boringbuilder-stages/compile/out/my-app /package
-    outputs: [/package]
-    export:
-      format: tar.zst
-      path: ./dist/my-app.tar.zst
-```
-
-## Cache
-
-Local caching is enabled by default under `~/.boringbuilder/cache`.
+A small YAML recipe is useful when you want files instead of an image:
 
 ```sh
-boringbuilder build                         # local cache
-boringbuilder build --no-cache              # cold build
-boringbuilder build --cache-explain         # explain reuse
-boringbuilder build --cache boringcache \
+boringbuilder build -f examples/artifact.yml --platform linux/arm64
+```
+
+See [examples/artifact.yml](examples/artifact.yml) for the complete recipe.
+Use `--target NAME` for multi-target recipes and `--build-arg KEY=VALUE`
+for Dockerfile or recipe variables.
+
+## Cache expensive work
+
+Local caching is on by default:
+
+```sh
+boringbuilder build
+boringbuilder build --cache-explain
+boringbuilder build --no-cache
+```
+
+Share build steps across ephemeral machines with BoringCache:
+
+```sh
+boringbuilder build \
+  --cache boringcache \
   --cache-workspace acme/project
-boringbuilder build --cache ghcr.io/acme/build-cache
 ```
 
-For a cross-platform macOS build using BoringCache, pass a Linux BoringCache
-binary with `--cache-bin` when one is not already discoverable locally.
+This repository uses the same integration for its Cargo builds, self-build,
+CI evidence, benchmarks, and release artifacts. BoringCache Cargo coordinates
+dependency and target snapshots with sccache compiler outputs as one lifecycle.
 
-## What it does
+## How builds run
 
-`boringbuilder` owns:
+On macOS, Linux builds run through Apple Container. On Linux, boringbuilder
+uses mounts and chroot directly on the host. Chroot is not a security boundary,
+so the Linux backend is for trusted builds on disposable or otherwise isolated
+machines.
 
-- native recipes and Dockerfile parsing;
-- build-time execution;
-- Linux and macOS execution backends;
-- content-addressed build caching;
-- artifact, OCI, and Docker-compatible exports;
-- registry push; and
-- platform targeting such as `linux/arm64`.
+Build-time execution is part of the builder; remote job orchestration is not.
 
-Everything is available through the single `boringbuilder build` command.
+## CI and releases
 
-## Install
+CI formats, lints, and tests the Rust project, then uses boringbuilder to build
+its own Dockerfile, export OCI, push to a disposable registry, and pull every
+blob back through the Registry API without Docker. Security CI runs RustSec,
+license and source policy, and zizmor. Dependency review, CodeQL for Rust and
+Actions, and OpenSSF Scorecard activate when the repository becomes public.
+Dependabot maintains Cargo and workflow dependencies, and a scheduled workflow
+records cold/warm wall time, peak memory, cache hits, and output digests.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/boringcache/builder/main/install.sh | sh
-```
-
-Or build from source with `cargo install --path .`.
-
-## Continuous integration
-
-CI treats formatting, Clippy warnings, the full test suite, recipe planning, and
-RustSec advisories as release gates. Dependabot maintains both Cargo crates and
-GitHub Actions. Every third-party workflow action is pinned to an immutable
-commit with least-privilege permissions.
-
-Boringbuilder dogfoods BoringCache for Cargo dependency archives, target
-snapshots, compiler outputs, and release artifacts. The same cache plan lives
-in `.boringcache.toml`, so local and hosted builds share one configuration.
-
-## Releases
-
-Releases use SemVer names. We start with `v0.1.0-alpha.1`, while the same
-pipeline supports `beta`, `rc`, other prerelease suffixes, and stable releases.
-Run the `Boringbuilder Release` workflow manually from `main` and enter the
-version. The workflow validates it, runs formatting, Clippy, tests, and the
-dependency audit, builds every supported binary, publishes checksums, and marks
-versions with a prerelease suffix as GitHub prereleases.
-
-Stable `vX.Y.Z` tags use the same gates and artifact pipeline. Install any
-specific stable or alpha release with:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/boringcache/builder/main/install.sh | \
-  BORINGBUILDER_VERSION=v0.1.0-alpha.1 sh
-```
+The release workflow accepts any SemVer version, requires it to match
+`Cargo.toml`, builds Linux amd64, Linux arm64, and Apple arm64 binaries,
+publishes checksums, and verifies installation from the new GitHub release.
+Versions such as `v0.1.0-alpha.1`, `v0.1.0-rc.1`, and `v0.1.0` all use
+the same pipeline.
 
 ## Develop
 
@@ -166,7 +130,7 @@ Rust 1.94.1 is pinned in `mise.toml`.
 ```sh
 mise install
 make verify
-cargo run -- build -f examples/artifact.yml --dry-run
+cargo run -- build -f Dockerfile --platform linux/arm64 --dry-run
 ```
 
-See `boringbuilder build --help` for the complete, intentionally small CLI.
+Run `boringbuilder build --help` for the intentionally small command surface.
