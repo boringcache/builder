@@ -142,6 +142,23 @@ Boringbuilder dogfoods BoringCache for Cargo dependency archives, target
 snapshots, compiler outputs, and release artifacts. The same cache plan lives
 in `.boringcache.toml`, so local and hosted builds share one configuration.
 
+## Releases
+
+Releases use SemVer names. We start with `v0.1.0-alpha.1`, while the same
+pipeline supports `beta`, `rc`, other prerelease suffixes, and stable releases.
+Run the `Boringbuilder Release` workflow manually from `main` and enter the
+version. The workflow validates it, runs formatting, Clippy, tests, and the
+dependency audit, builds every supported binary, publishes checksums, and marks
+versions with a prerelease suffix as GitHub prereleases.
+
+Stable `vX.Y.Z` tags use the same gates and artifact pipeline. Install any
+specific stable or alpha release with:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/boringcache/builder/main/install.sh | \
+  BORINGBUILDER_VERSION=v0.1.0-alpha.1 sh
+```
+
 ## Develop
 
 Rust 1.94.1 is pinned in `mise.toml`.
