@@ -42,6 +42,7 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Set up BoringCache compiler cache
+        if: github.event_name != 'pull_request'
         uses: boringcache/one@dbbed01c94f89e6b52964e91477617ce6c39488d # v1 / 1.19.5
         with:
           trust-policy: auto
