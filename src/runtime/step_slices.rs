@@ -492,8 +492,9 @@ pub(crate) fn compute_step_state(
         None if hash_default_rootfs => {
             let input = StepBuildCacheInput {
                 path: "/".to_string(),
-                exclude: crate::cache::slice::STEP_SLICE_IGNORED_PREFIXES
+                exclude: crate::util::fs_tree::PSEUDO_FS_DIRS
                     .iter()
+                    .chain(crate::cache::slice::STEP_SLICE_IGNORED_PREFIXES)
                     .map(|path| (*path).to_string())
                     .collect(),
             };

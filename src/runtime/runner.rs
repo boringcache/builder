@@ -982,7 +982,9 @@ mod tests {
         let temp = tempdir().unwrap();
         let rootfs = temp.path().join("rootfs");
         fs::create_dir_all(rootfs.join("var/lib/apt/lists")).unwrap();
+        fs::create_dir_all(rootfs.join("dev")).unwrap();
         fs::write(rootfs.join("var/lib/apt/lists/packages"), "one\n").unwrap();
+        fs::write(rootfs.join("dev/full"), "one\n").unwrap();
 
         let pipeline = Pipeline {
             image: "debian:bookworm-slim".to_string(),
@@ -1016,6 +1018,7 @@ mod tests {
 
         let first = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
         fs::write(rootfs.join("var/lib/apt/lists/packages"), "two\n").unwrap();
+        fs::write(rootfs.join("dev/full"), "two\n").unwrap();
         let second = compute_step_state_key("previous", &pipeline, &step, &rootfs).unwrap();
 
         assert_eq!(first, second);
