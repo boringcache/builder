@@ -64,6 +64,7 @@ jobs:
             GITHUB_SHA="$GITHUB_SHA" \
             HOME="$HOME" \
             PATH="$PATH" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
             python3 scripts/benchmark.py \
               --binary target/release/boringbuilder \
               --boringcache "$boringcache_bin" \
@@ -86,6 +87,7 @@ jobs:
           fail-on-cache-error: true
 
       - name: Upload benchmark report
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: boringbuilder-benchmark
