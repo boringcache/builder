@@ -1,8 +1,11 @@
 FROM rust:1.97.1-slim-bookworm@sha256:2775a09d208ff0d7c1f50490c45b62db929e87ba1dcbc3f2132ac71a704bcdd3 AS build
 
 ARG BORINGBUILDER_CACHE_EPOCH=release
+COPY scripts/install-sccache.sh /usr/local/bin/install-sccache
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential cmake perl pkg-config \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates cmake curl perl pkg-config \
+    && /bin/sh /usr/local/bin/install-sccache \
+    && rm /usr/local/bin/install-sccache \
     && rm -rf /var/lib/apt/lists/* \
     && test -n "${BORINGBUILDER_CACHE_EPOCH}"
 
@@ -10,8 +13,7 @@ WORKDIR /src
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 COPY src src
-RUN --mount=type=secret,id=boringbuilder-sccache,target=/usr/local/bin/sccache,required=false,mode=0555 \
-    --mount=type=cache,id=boringbuilder-cargo-registry-${BORINGBUILDER_CACHE_EPOCH},target=/usr/local/cargo/registry,sharing=locked \
+RUN --mount=type=cache,id=boringbuilder-cargo-registry-${BORINGBUILDER_CACHE_EPOCH},target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=boringbuilder-cargo-git-${BORINGBUILDER_CACHE_EPOCH},target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=boringbuilder-cargo-target-${BORINGBUILDER_CACHE_EPOCH},target=/src/target,sharing=locked \
     cargo build --locked --release \
