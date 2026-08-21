@@ -55,7 +55,6 @@ jobs:
           sudo env \
             BORINGCACHE_RESTORE_TOKEN="$BORINGCACHE_RESTORE_TOKEN" \
             BORINGCACHE_SAVE_TOKEN="$BORINGCACHE_SAVE_TOKEN" \
-            BORINGCACHE_DOCKER_SCCACHE_BINARY="$sccache_bin" \
             GITHUB_ACTIONS="$GITHUB_ACTIONS" \
             GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
             GITHUB_REF="$GITHUB_REF" \
@@ -68,6 +67,7 @@ jobs:
             python3 scripts/benchmark.py \
               --binary target/release/boringbuilder \
               --boringcache "$boringcache_bin" \
+              --sccache "$sccache_bin" \
               --dockerfile Dockerfile \
               --platform linux/amd64 \
               --output dist/benchmark \

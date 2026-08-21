@@ -10,7 +10,8 @@ WORKDIR /src
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 COPY src src
-RUN --mount=type=cache,id=boringbuilder-cargo-registry-${BORINGBUILDER_CACHE_EPOCH},target=/usr/local/cargo/registry,sharing=locked \
+RUN --mount=type=secret,id=boringbuilder-sccache,target=/usr/local/bin/sccache,required=false,mode=0555 \
+    --mount=type=cache,id=boringbuilder-cargo-registry-${BORINGBUILDER_CACHE_EPOCH},target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=boringbuilder-cargo-git-${BORINGBUILDER_CACHE_EPOCH},target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=boringbuilder-cargo-target-${BORINGBUILDER_CACHE_EPOCH},target=/src/target,sharing=locked \
     cargo build --locked --release \

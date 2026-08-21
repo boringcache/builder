@@ -95,6 +95,11 @@ boringbuilder build \
   --cache-workspace acme/project
 ```
 
+Boringbuilder sends both whole-step snapshots and declared Dockerfile
+`RUN --mount=type=cache` data through the selected backend. A whole-step hit
+skips the command; if source changes invalidate that step, Cargo can still reuse
+its registry, Git, and target mounts.
+
 This repository dogfoods both cache layers. Multi-command validation jobs use
 one BoringCache-managed sccache session. Release, benchmark, and self-build jobs
 use one BoringCache Cargo lifecycle for registry, target, and compiler caches.
@@ -120,7 +125,8 @@ Dependabot maintains Cargo and workflow dependencies. A scheduled workflow runs
 the same Dockerfile through boringbuilder and BoringCache-managed Docker
 BuildKit on one ephemeral runner. It compares cold and warm wall time, cache
 reuse, OCI size, and output reproducibility. The Docker lane combines BuildKit
-layers with BoringCache-managed Cargo mounts and sccache.
+layers with BoringCache-managed Cargo mounts and a session-mounted, verified
+sccache binary; the compiler cache does not become part of the image.
 
 The release workflow accepts any SemVer version, requires it to match
 `Cargo.toml`, builds Linux amd64, Linux arm64, and Apple arm64 binaries,

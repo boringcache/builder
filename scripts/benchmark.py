@@ -20,6 +20,7 @@ from typing import Any
 class Settings:
     binary: Path
     boringcache: Path
+    sccache: Path
     dockerfile: Path
     platform: str
     output: Path
@@ -164,6 +165,8 @@ def run_buildkit(
             "--provenance=false",
             "--sbom=false",
             "--progress=plain",
+            "--secret",
+            f"id=boringbuilder-sccache,src={settings.sccache}",
             "--output",
             f"type=oci,dest={image},tar=false",
             str(settings.dockerfile.parent),
@@ -267,6 +270,7 @@ def main() -> None:
         "--binary", type=Path, default=Path("target/release/boringbuilder")
     )
     parser.add_argument("--boringcache", type=Path, default=Path("boringcache"))
+    parser.add_argument("--sccache", type=Path, default=Path("sccache"))
     parser.add_argument("--dockerfile", type=Path, default=Path("Dockerfile"))
     parser.add_argument("--platform", default="linux/amd64")
     parser.add_argument("--output", type=Path, default=Path("dist/benchmark"))
@@ -286,6 +290,10 @@ def main() -> None:
         if boringcache_command
         else args.boringcache.resolve()
     )
+    sccache_command = shutil.which(str(args.sccache))
+    sccache = (
+        Path(sccache_command).resolve() if sccache_command else args.sccache.resolve()
+    )
     dockerfile = args.dockerfile.resolve()
     output = args.output.resolve()
     shutil.rmtree(output, ignore_errors=True)
@@ -293,6 +301,7 @@ def main() -> None:
     settings = Settings(
         binary=binary,
         boringcache=boringcache,
+        sccache=sccache,
         dockerfile=dockerfile,
         platform=args.platform,
         output=output,
