@@ -20,7 +20,7 @@ env:
 
 jobs:
   dockerfile:
-    name: Dockerfile cold and warm
+    name: Boringbuilder vs Docker BuildKit
     runs-on: ubuntu-24.04
     timeout-minutes: 90
 
@@ -43,14 +43,35 @@ jobs:
           mode: cargo
           fail-on-cache-error: true
 
-      - name: Measure cold and warm self-builds
+      - name: Check Docker Buildx
         run: |
-          sudo --preserve-env=GITHUB_SHA \
+          docker version
+          docker buildx version
+
+      - name: Compare cold and warm self-builds
+        run: |
+          boringcache_bin="$(command -v boringcache)"
+          sccache_bin="$(command -v sccache)"
+          sudo env \
+            BORINGCACHE_RESTORE_TOKEN="$BORINGCACHE_RESTORE_TOKEN" \
+            BORINGCACHE_SAVE_TOKEN="$BORINGCACHE_SAVE_TOKEN" \
+            BORINGCACHE_DOCKER_SCCACHE_BINARY="$sccache_bin" \
+            GITHUB_ACTIONS="$GITHUB_ACTIONS" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
+            GITHUB_REF="$GITHUB_REF" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_SHA="$GITHUB_SHA" \
+            HOME="$HOME" \
+            PATH="$PATH" \
             python3 scripts/benchmark.py \
               --binary target/release/boringbuilder \
+              --boringcache "$boringcache_bin" \
               --dockerfile Dockerfile \
               --platform linux/amd64 \
-              --output dist/benchmark
+              --output dist/benchmark \
+              --cache-tag "builder-comparison-$GITHUB_RUN_ID" \
+              --cache-epoch "$GITHUB_RUN_ID"
           sudo chown -R "$(id -u):$(id -g)" dist
 
       - name: Publish benchmark summary
@@ -73,5 +94,6 @@ jobs:
             dist/benchmark/benchmark.md
             dist/benchmark/*-timings.json
             dist/benchmark/*-resources.txt
+            dist/benchmark/*.log
           if-no-files-found: error
           retention-days: 90

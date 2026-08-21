@@ -10,7 +10,11 @@ WORKDIR /src
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 COPY src src
-RUN cargo build --locked --release
+RUN --mount=type=cache,id=boringbuilder-cargo-registry-${BORINGBUILDER_CACHE_EPOCH},target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=boringbuilder-cargo-git-${BORINGBUILDER_CACHE_EPOCH},target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=boringbuilder-cargo-target-${BORINGBUILDER_CACHE_EPOCH},target=/src/target,sharing=locked \
+    cargo build --locked --release \
+    && install -D -m 0755 target/release/boringbuilder /out/boringbuilder
 
 FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
 
@@ -20,7 +24,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && test -n "${BORINGBUILDER_CACHE_EPOCH}"
 
-COPY --from=build /src/target/release/boringbuilder /usr/local/bin/boringbuilder
+COPY --from=build /out/boringbuilder /usr/local/bin/boringbuilder
 
 ENTRYPOINT ["/usr/local/bin/boringbuilder"]
 CMD ["--help"]

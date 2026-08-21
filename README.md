@@ -116,8 +116,11 @@ export OCI, push to a disposable registry, and pull every blob back through the
 Registry API without Docker. Security CI runs RustSec, license and source
 policy, and zizmor. Dependency review, CodeQL for Rust and Actions, and OpenSSF
 Scorecard activate when the repository becomes public.
-Dependabot maintains Cargo and workflow dependencies, and a scheduled workflow
-records cold/warm wall time, peak memory, cache hits, and output digests.
+Dependabot maintains Cargo and workflow dependencies. A scheduled workflow runs
+the same Dockerfile through boringbuilder and BoringCache-managed Docker
+BuildKit on one ephemeral runner. It compares cold and warm wall time, cache
+reuse, OCI size, and output reproducibility. The Docker lane combines BuildKit
+layers with BoringCache-managed Cargo mounts and sccache.
 
 The release workflow accepts any SemVer version, requires it to match
 `Cargo.toml`, builds Linux amd64, Linux arm64, and Apple arm64 binaries,

@@ -24,3 +24,6 @@ profiles = ["cargo"]
 command = ["cargo", "build", "--locked", "--release"]
 compiler-cache = "sccache"
 metadata-hints = ["project=boringbuilder"]
+
+[adapters.docker]
+metadata-hints = ["project=boringbuilder", "purpose=builder-comparison"]
