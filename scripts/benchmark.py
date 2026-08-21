@@ -105,8 +105,6 @@ def run_boringbuilder(
             "oci",
             "-o",
             str(image),
-            "--cache-dir",
-            str(settings.output / "boringbuilder-cache"),
             "--cache",
             "boringcache",
             "--cache-workspace",
