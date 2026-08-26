@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+bundle check
+bundle exec rake
+bundle exec bundle-audit check --update
+bundle exec rake build
+
+install_root=$(mktemp -d "${TMPDIR:-/tmp}/boringbuilder-gem.XXXXXX")
+trap 'rm -rf "$install_root"' EXIT
+gem_file="pkg/boringbuilder-$(bundle exec ruby -Ilib -rboringbuilder/version -e 'print BoringBuilder::VERSION').gem"
+
+GEM_HOME="$install_root/gems" GEM_PATH="$install_root/gems" \
+  gem install --env-shebang --no-document --install-dir "$install_root/gems" --bindir "$install_root/bin" "$gem_file"
+GEM_HOME="$install_root/gems" GEM_PATH="$install_root/gems" "$install_root/bin/boringbuilder" version
+GEM_HOME="$install_root/gems" GEM_PATH="$install_root/gems" \
+  ruby -e 'require "boringbuilder"; abort "BoringBuilder failed to load" unless defined?(BoringBuilder::VERSION)'

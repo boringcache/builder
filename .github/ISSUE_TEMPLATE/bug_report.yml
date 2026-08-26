@@ -1,0 +1,33 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: ""
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, private source code, or personal data.
+  - type: input
+    id: versions
+    attributes:
+      label: BoringBuilder, Ruby, Dagger, and runtime versions
+      placeholder: Include every version reported by the installed tools
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true

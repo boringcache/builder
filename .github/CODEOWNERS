@@ -1,0 +1,8 @@
+* @gauravtiwari
+
+# Build, dependency, and release policy changes are security-sensitive.
+/.github/ @gauravtiwari
+/boringbuilder.gemspec @gauravtiwari
+/Gemfile @gauravtiwari
+/lib/boringbuilder/runtime.rb @gauravtiwari
+/lib/boringbuilder/exporter.rb @gauravtiwari

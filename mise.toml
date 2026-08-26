@@ -1,0 +1,27 @@
+[tools]
+ruby = "4.0.6"
+dagger = "0.21.8"
+
+[tasks.setup]
+description = "Install gem dependencies"
+run = "bin/setup"
+
+[tasks.test]
+description = "Run the test suite"
+run = "bundle exec rake test"
+
+[tasks.lint]
+description = "Run RuboCop"
+run = "bundle exec rubocop"
+
+[tasks.verify]
+description = "Run the complete gem verification"
+run = "bin/ci"
+
+[tasks.build]
+description = "Build the gem"
+run = "bundle exec rake build"
+
+[tasks.bb]
+description = "Run the local BoringBuilder executable"
+run = "bundle exec boringbuilder"

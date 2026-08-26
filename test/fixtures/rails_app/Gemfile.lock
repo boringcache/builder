@@ -1,0 +1,15 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+
+PLATFORMS
+  arm64-darwin-23
+  ruby
+
+DEPENDENCIES
+
+CHECKSUMS
+  bundler (4.0.19) sha256=b48056e4c77fb3853cc47775b5447ede44aaa4f53c32f168014ab4fe86587d47
+
+BUNDLED WITH
+  4.0.19

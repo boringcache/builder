@@ -1,0 +1,12 @@
+/.bundle/
+/Gemfile.lock
+/coverage/
+/dist/
+/pkg/
+/target/
+/test/fixtures/**/dist/
+/tmp/
+/vendor/
+*.gem
+.DS_Store
+.env*
