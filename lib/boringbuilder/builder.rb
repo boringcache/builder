@@ -6,7 +6,7 @@ module BoringBuilder
   class Builder
     attr_reader :configuration, :progress
 
-    def initialize(configuration, progress: BuildProgress.silent)
+    def initialize(configuration, progress: DaggerRuby::Progress.silent)
       @configuration = configuration
       @progress = progress
     end

@@ -75,7 +75,7 @@ class PipelineTest < Minitest::Test
     project = BoringBuilder::Project.new(BoringBuilder::Configuration.new(root: root)).validate!
     client = RecordingClient.new(stdout: "compiled\n", stderr: "one warning\n")
     output = StringIO.new
-    progress = BoringBuilder::BuildProgress.new(out: output)
+    progress = DaggerRuby::Progress.new(out: output)
     pipeline = BoringBuilder::Pipeline.new(project, client, environment: {}, progress: progress)
 
     pipeline.exec(client.container, %w[rake compile], name: "Build application")

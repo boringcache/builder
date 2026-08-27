@@ -20,23 +20,29 @@ module BoringBuilder
       "BUNDLE_CLEAN" => "true",
       "BUNDLE_DEPLOYMENT" => "1",
       "BUNDLE_IGNORE_CONFIG" => "true",
-      "BUNDLE_JOBS" => "1",
       "BUNDLE_PATH" => "/usr/local/bundle",
       "BUNDLE_WITHOUT" => "development:test"
     }.freeze
-    BUNDLE_INSTALL_COMMAND = ["sh", "-c", "bundle install && bundle clean --force"].freeze
+    BUNDLE_INSTALL_COMMAND = [
+      "sh", "-c",
+      'export BUNDLE_JOBS="${BUNDLE_JOBS:-$(nproc)}"; bundle install && bundle clean --force'
+    ].freeze
+    APT_INSTALL_COMMAND = [
+      "sh", "-c",
+      "apt-get update && apt-get install -y --no-install-recommends \"$@\" && rm -rf /var/lib/apt/lists/*",
+      "apt-get"
+    ].freeze
     BUNDLE_FILES = %w[Gemfile Gemfile.lock .ruby-version].freeze
     BUNDLE_CONFIG = <<~YAML
       ---
       BUNDLE_PATH: "vendor/bundle"
       BUNDLE_WITHOUT: "development:test"
-      BUNDLE_JOBS: "1"
       BUNDLE_CLEAN: "true"
     YAML
 
     attr_reader :project, :client, :progress
 
-    def initialize(project, client, progress: BuildProgress.silent)
+    def initialize(project, client, progress: DaggerRuby::Progress.silent)
       @project = project
       @client = client
       @progress = progress
@@ -44,15 +50,21 @@ module BoringBuilder
 
     def container
       builder = with_environment(build_image_container, build_environment)
-      builder = install_packages(builder, (BUILD_PACKAGES + configuration.build_packages).uniq)
-      builder = create_application_user(builder)
+      builder = install_packages(builder, (BUILD_PACKAGES + configuration.build_packages).uniq, stage: :build)
+      builder = create_application_user(builder, stage: :build)
       builder = install_toolchain(builder)
       builder = install_gems(builder)
-      builder = builder.with_directory(application_path, project.source(client), owner: user_owner)
-      builder = builder.with_workdir(application_path).with_exec(%w[bundle check])
+      builder = pipeline.step("[build] COPY application source", builder) do |container|
+        container.with_directory(application_path, project.source(client), owner: user_owner)
+      end
+      builder = pipeline.exec(
+        builder,
+        %w[bundle check],
+        name: "[build] RUN bundle check",
+        workdir: application_path
+      )
       builder = precompile(builder)
-      builder = write_bundle_config(builder)
-      builder = progress.step("Build #{project.framework.to_s.capitalize} application") { builder.sync }
+      builder = pipeline.step("[build] Write Bundler configuration", builder) { write_bundle_config(_1) }
 
       runtime_container(builder)
     end
@@ -77,12 +89,12 @@ module BoringBuilder
 
     def build_image_container
       address = configuration.base_image || DEFAULT_BUILD_IMAGE
-      client.container(image_options).from(address)
+      progress.step("[build] FROM #{address}") { client.container(image_options).from(address).sync }
     end
 
     def runtime_image_container
       address = configuration.base_image || DEFAULT_RUNTIME_IMAGE
-      client.container(image_options).from(address)
+      progress.step("[runtime] FROM #{address}") { client.container(image_options).from(address).sync }
     end
 
     def build_environment
@@ -119,7 +131,7 @@ module BoringBuilder
         cache: "bundle",
         at: "/usr/local/bundle/cache",
         entry: "bundler",
-        name: "Install gems"
+        name: "[build] RUN bundle install"
       )
       container.with_exec(["find", "/usr/local/bundle", "-path", "*/cache/*.gem", "-type", "f", "-delete"])
                .with_exec([
@@ -130,6 +142,7 @@ module BoringBuilder
 
     def write_bundle_config(container)
       container.with_workdir(application_path)
+               .with_exec(%w[rm -rf .bundle/cache])
                .with_exec(%w[mkdir -p .bundle])
                .with_new_file("#{application_path}/.bundle/config", BUNDLE_CONFIG)
     end
@@ -140,41 +153,59 @@ module BoringBuilder
 
     def runtime_container(builder)
       container = with_environment(runtime_image_container, Mise::ENVIRONMENT.merge(runtime_environment))
-      container = install_packages(container, (RUNTIME_PACKAGES + configuration.runtime_packages).uniq)
-      container = create_application_user(container)
-      container = container.with_directory("/mise/installs", builder.directory("/mise/installs"))
-                           .with_directory("/usr/local/bundle", builder.directory("/usr/local/bundle"),
-                                           owner: user_owner)
-                           .with_directory(application_path, builder.directory(application_path), owner: user_owner)
-                           .with_workdir(application_path)
-                           .with_exec(%w[mise reshim])
+      container = install_packages(container, (RUNTIME_PACKAGES + configuration.runtime_packages).uniq,
+                                   stage: :runtime)
+      container = create_application_user(container, stage: :runtime)
+      container = pipeline.step("[runtime] COPY toolchain, gems, and application", container) do |runtime|
+        runtime.with_directory("/mise/installs", builder.directory("/mise/installs"))
+               .with_directory("/usr/local/bundle", builder.directory("/usr/local/bundle"), owner: user_owner)
+               .with_directory(application_path, builder.directory(application_path), owner: user_owner)
+      end
+      container = pipeline.exec(
+        container,
+        %w[mise reshim],
+        name: "[runtime] RUN mise reshim",
+        workdir: application_path
+      )
       container = runtime_metadata(container).with_user(project.application_user)
-      progress.step("Assemble runtime image") { container.sync }
+      progress.step("[runtime] Configure image") { container.sync }
     end
 
-    def install_packages(container, packages)
-      container
-        .with_exec(%w[apt-get update])
-        .with_exec(["apt-get", "install", "-y", "--no-install-recommends", *packages])
-        .with_exec(%w[rm -rf /var/lib/apt/lists])
+    def install_packages(container, packages, stage:)
+      pipeline.exec(
+        container,
+        [*APT_INSTALL_COMMAND, *packages],
+        name: "[#{stage}] RUN apt-get update && apt-get install packages"
+      )
     end
 
-    def create_application_user(container)
+    def create_application_user(container, stage:)
       name = project.application_user
-      container
-        .with_exec(["groupadd", "--system", "--gid", "1000", name])
-        .with_exec(["useradd", name, "--uid", "1000", "--gid", "1000", "--create-home", "--shell", "/bin/bash"])
+      pipeline.step("[#{stage}] Create application user", container) do |step|
+        step.with_exec(["groupadd", "--system", "--gid", "1000", name])
+            .with_exec(["useradd", name, "--uid", "1000", "--gid", "1000", "--create-home", "--shell", "/bin/bash"])
+      end
     end
 
     def precompile(container)
-      container = container.with_exec(%w[bin/rails assets:precompile]) if project.rails? && project.assets?
+      if project.rails? && project.assets?
+        container = pipeline.exec(
+          container,
+          %w[bin/rails assets:precompile],
+          name: "[build] RUN bin/rails assets:precompile"
+        )
+      end
       if project.bootsnap?
         paths = project.rails? ? %w[app/ lib/] : %w[app/ lib/ config/]
-        container = container.with_exec(["bundle", "exec", "bootsnap", "precompile", "--gemfile", *paths])
+        container = pipeline.exec(
+          container,
+          ["bundle", "exec", "bootsnap", "precompile", "--gemfile", *paths],
+          name: "[build] RUN bundle exec bootsnap precompile"
+        )
       end
       return container unless project.rails?
 
-      normalize_rails_output(container)
+      pipeline.step("[build] Normalize Rails output", container) { normalize_rails_output(_1) }
     end
 
     def normalize_rails_output(container)

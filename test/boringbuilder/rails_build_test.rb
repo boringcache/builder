@@ -33,17 +33,10 @@ class RailsBuildTest < Minitest::Test
 
     BoringBuilder::RailsBuild.new(project, client).container
 
-    owned_directories = client.calls.filter_map do |method, arguments, options|
-      arguments.first if method == :with_directory && options[:owner] == "rails:rails"
-    end
-
     assert_equal 2, client.calls.count([:container, [{}], {}])
-    assert_includes client.calls,
-                    [:with_exec, [["apt-get", "install", "-y", "--no-install-recommends",
-                                   "build-essential", "curl", "git", "libpq-dev", "libyaml-dev", "pkg-config"]], {}]
-    assert_includes client.calls,
-                    [:with_exec, [["apt-get", "install", "-y", "--no-install-recommends", "curl", "libpq5"]], {}]
-    assert_equal ["/rails", "/rails", "/usr/local/bundle"], owned_directories.sort
+    assert_includes package_commands(client), %w[build-essential curl git libpq-dev libyaml-dev pkg-config]
+    assert_includes package_commands(client), %w[curl libpq5]
+    assert_equal ["/rails", "/rails", "/usr/local/bundle"], owned_directories(client).sort
   end
 
   def test_uses_rails_docker_entrypoint_when_present
@@ -77,5 +70,21 @@ class RailsBuildTest < Minitest::Test
     assert(client.calls.any? do |method, arguments, _options|
       method == :with_docker_healthcheck && arguments.first.any? { |argument| argument.include?("localhost:80/up") }
     end)
+  end
+
+  private
+
+  def package_commands(client)
+    client.calls
+          .select { |call| call.first == :with_exec }
+          .map { |call| call[1].first }
+          .select { |command| command.first(4) == BoringBuilder::RubyBuild::APT_INSTALL_COMMAND }
+          .map { |command| command.drop(4) }
+  end
+
+  def owned_directories(client)
+    client.calls.filter_map do |method, arguments, options|
+      arguments.first if method == :with_directory && options[:owner] == "rails:rails"
+    end
   end
 end

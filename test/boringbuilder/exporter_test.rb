@@ -32,10 +32,32 @@ class ExporterTest < Minitest::Test
                        "--pax-option=delete=atime,delete=ctime", "-C", "/artifact", "-cf", "/artifact.tar", "."]],
                      {}]
     zstd_call = client.calls.find do |name, arguments, _options|
-      name == :with_exec && arguments.flatten.include?("zstd")
+      name == :with_exec && arguments.first.first == "zstd"
     end
 
     refute_nil zstd_call
+    assert_includes zstd_call[1].first, "-T0"
+  end
+
+  def test_describes_the_real_archive_steps
+    root = build_project
+    configuration = BoringBuilder::Configuration.new(root: root, format: :tar_zst)
+    project = BoringBuilder::Project.new(configuration).validate!
+    client = RecordingClient.new
+    progress_output = StringIO.new
+
+    BoringBuilder::Exporter.new(
+      project,
+      client,
+      RecordingNode.new(client.calls),
+      runtime: :docker,
+      progress: DaggerRuby::Progress.new(out: progress_output)
+    ).call
+
+    assert_includes progress_output.string, "[export] Assemble artifact filesystem"
+    assert_includes progress_output.string, "[export] RUN tar -cf /artifact.tar ."
+    assert_includes progress_output.string, "[export] RUN zstd -T0 /artifact.tar"
+    assert_includes progress_output.string, "[export] Write tar.zst artifact"
   end
 
   def test_assembles_remapped_container_and_host_content

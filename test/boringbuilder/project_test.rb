@@ -40,6 +40,7 @@ class ProjectTest < Minitest::Test
 
     assert_includes BoringBuilder::Project::DEFAULT_EXCLUDES, ".env"
     assert_includes BoringBuilder::Project::DEFAULT_EXCLUDES, ".env.*"
+    assert_includes BoringBuilder::Project::DEFAULT_EXCLUDES, ".bundle/cache"
     assert_includes client.calls,
                     [:directory, [root.to_s], { exclude: BoringBuilder::Project::DEFAULT_EXCLUDES, gitignore: true }]
   end

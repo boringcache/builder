@@ -10,7 +10,7 @@ module BoringBuilder
     attr_reader :project, :client, :container, :runtime, :exporters, :progress
 
     def initialize(project, client, container, runtime:, command_runner: nil, exporters: nil,
-                   progress: BuildProgress.silent)
+                   progress: DaggerRuby::Progress.silent)
       @project = project
       @client = client
       @container = container
@@ -56,33 +56,36 @@ module BoringBuilder
     end
 
     def export_step_name(adapter)
-      return "Publish artifact to BoringCache" if adapter.name == :boringcache
+      return "[export] Publish artifact to BoringCache" if adapter.name == :boringcache
 
-      "Export #{configuration.format.to_s.tr('_', '.')} artifact"
+      "[export] Write #{configuration.format.to_s.tr('_', '.')} artifact"
     end
 
     def build_asset
       filename = project.output_path.basename.to_s
       case configuration.format
       when :directory
-        Exporters::Asset.new(kind: :directory, source: artifact_directory, filename: filename)
+        Exporters::Asset.new(kind: :directory, source: prepared_artifact_directory, filename: filename)
       when :tar
         Exporters::Asset.new(kind: :file, source: archive_file("artifact.tar", compression: nil), filename: filename)
       when :tar_zst
         Exporters::Asset.new(kind: :file, source: archive_file("artifact.tar.zst", compression: :zstd),
                              filename: filename)
       when :oci, :docker
-        Exporters::Asset.new(kind: :file, source: container.as_tarball(media_types: media_types), filename: filename)
+        source = progress.step("[export] Create #{configuration.format.to_s.upcase} image archive") do
+          container.as_tarball(media_types: media_types).sync
+        end
+        Exporters::Asset.new(kind: :file, source: source, filename: filename)
       end
     end
 
     def export_reference
       if configuration.publish
-        progress.step("Publish container image") do
+        progress.step("[export] Publish container image") do
           container.publish(configuration.publish, media_types: media_types)
         end
       elsif configuration.load
-        progress.step("Load container image") { load_image }
+        progress.step("[export] Load container image") { load_image }
       end
     end
 
@@ -123,18 +126,46 @@ module BoringBuilder
       @artifact_directory ||= project.artifact.export_directory(client, container)
     end
 
+    def prepared_artifact_directory
+      @prepared_artifact_directory ||= progress.step("[export] Assemble artifact filesystem") do
+        artifact_directory.sync
+      end
+    end
+
     def archive_file(filename, compression:)
-      packer = client.container.from(PACKER_IMAGE).with_exec(%w[apk add --no-cache tar zstd])
-      packer = packer.with_mounted_directory("/artifact", artifact_directory)
+      packer = progress.step("[export] FROM #{PACKER_IMAGE}") { client.container.from(PACKER_IMAGE).sync }
+      packer = run_archive_step(packer, %w[apk add --no-cache tar zstd], "[export] RUN apk add tar zstd")
+      packer = packer.with_mounted_directory("/artifact", prepared_artifact_directory)
       tar_path = compression == :zstd ? "/artifact.tar" : "/#{filename}"
-      packer = packer.with_exec(
+      packer = run_archive_step(
+        packer,
         [
           "tar", "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner",
           "--pax-option=delete=atime,delete=ctime", "-C", "/artifact", "-cf", tar_path, "."
-        ]
+        ],
+        "[export] RUN tar -cf #{tar_path} ."
       )
-      packer = packer.with_exec(["zstd", "-q", "-T1", tar_path, "-o", "/#{filename}"]) if compression == :zstd
+      if compression == :zstd
+        packer = run_archive_step(
+          packer,
+          ["zstd", "-q", "-T0", tar_path, "-o", "/#{filename}"],
+          "[export] RUN zstd -T0 #{tar_path}"
+        )
+      end
       packer.file("/#{filename}")
+    end
+
+    def run_archive_step(container, command, name)
+      executed = container.with_exec(command)
+      progress.step(name) do
+        output = command_output(executed)
+        progress.write(output) unless progress.streaming?
+        executed.sync
+      end
+    end
+
+    def command_output(container)
+      [container.stdout, container.stderr].map(&:strip).reject(&:empty?).join("\n")
     end
 
     def media_types
