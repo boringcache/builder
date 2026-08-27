@@ -1,10 +1,14 @@
 # Changelog
 
+## 0.1.0.alpha.3 - 2026-08-27
+
+- Remove Bundler cache metadata before compiling assets so cold and restored Rails builds stay identical.
+
 ## 0.1.0.alpha.2 - 2026-08-27
 
 - Stream clean, Docker-style build steps and command output through Dagger Ruby.
 - Run Bundler with the available CPUs unless `BUNDLE_JOBS` is explicitly configured.
-- Keep Rails artifacts identical across cold and restored dependency caches.
+- Keep dependency cache metadata out of Rails artifacts.
 
 ## 0.1.0.alpha.1 - 2026-08-27
 

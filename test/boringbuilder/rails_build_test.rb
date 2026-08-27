@@ -26,6 +26,19 @@ class RailsBuildTest < Minitest::Test
     assert_includes client.calls, [:with_user, ["rails"], {}]
   end
 
+  def test_removes_dependency_metadata_before_compiling_assets
+    root = build_project
+    project = BoringBuilder::Project.new(BoringBuilder::Configuration.new(root: root)).validate!
+    client = RecordingClient.new
+
+    BoringBuilder::RailsBuild.new(project, client).container
+
+    cleanup = client.calls.index([:with_exec, [%w[rm -rf .bundle/cache]], {}])
+    assets = client.calls.index([:with_exec, [%w[bin/rails assets:precompile]], {}])
+
+    assert_operator cleanup, :<, assets
+  end
+
   def test_keeps_build_packages_out_of_the_runtime_stage
     root = build_project
     project = BoringBuilder::Project.new(BoringBuilder::Configuration.new(root: root)).validate!
