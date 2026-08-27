@@ -63,6 +63,12 @@ module BoringBuilder
         name: "[build] RUN bundle check",
         workdir: application_path
       )
+      builder = pipeline.exec(
+        builder,
+        %w[rm -rf .bundle/cache],
+        name: "[build] RUN rm -rf .bundle/cache",
+        workdir: application_path
+      )
       builder = precompile(builder)
       builder = pipeline.step("[build] Write Bundler configuration", builder) { write_bundle_config(_1) }
 
