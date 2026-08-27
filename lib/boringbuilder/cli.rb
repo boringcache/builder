@@ -59,7 +59,7 @@ module BoringBuilder
     end
 
     def build
-      options = {}
+      options = { progress: "pretty" }
       config_file = :auto
       dry_run = false
       json = false
@@ -71,6 +71,8 @@ module BoringBuilder
       return 0 if help_requested
       raise OptionParser::InvalidArgument, "expected at most one PROJECT directory" if @argv.length > 1
 
+      options[:progress] = nil if json
+
       configuration = BoringBuilder.configuration(root: @argv.first || Dir.pwd, config: config_file, **options)
       project = Project.new(configuration).validate!
       if dry_run
@@ -78,8 +80,9 @@ module BoringBuilder
         return 0
       end
 
-      print_build_start(project, json: json)
-      result = @builder_class.new(configuration, progress: build_progress(configuration, json: json)).build
+      progress = build_progress(configuration, json: json)
+      print_build_start(project, json: json, progress: progress)
+      result = @builder_class.new(configuration, progress: progress).build
       json ? @out.puts(JSON.generate(result.to_h)) : print_result(result)
       0
     end
@@ -109,7 +112,8 @@ module BoringBuilder
       parser.on("--platform PLATFORM", "Target platform, for example linux/amd64") do |value|
         options[:platform] = value
       end
-      parser.on("--progress MODE", %w[auto plain tty], "Dagger progress: auto, plain, or tty") do |value|
+      parser.on("--progress MODE", %w[pretty auto plain tty dots logs],
+                "Build progress: pretty (default), auto, plain, tty, dots, or logs") do |value|
         options[:progress] = value
       end
     end
@@ -209,7 +213,7 @@ module BoringBuilder
       @out.puts "Artifact: #{result.artifact_id} (#{result.artifact_name})" if result.artifact_published?
     end
 
-    def print_build_start(project, json:)
+    def print_build_start(project, json:, progress:)
       return if json || !dagger_session?
 
       cache = BoringCache.new(project, nil, environment: @environment).mode
@@ -217,8 +221,7 @@ module BoringBuilder
       details = [pipeline, "#{project.configuration.runtime} runtime", "#{cache} cache",
                  "#{project.configuration.format.to_s.tr('_', '.')} output"]
 
-      @out.puts "Building #{project.app_name} with Dagger"
-      @out.puts "  #{details.join(' · ')}"
+      progress.message("Building #{project.app_name} with Dagger\n  #{details.join(' · ')}")
     end
 
     def dagger_session?
@@ -226,9 +229,8 @@ module BoringBuilder
     end
 
     def build_progress(configuration, json:)
-      enabled = !json && dagger_session? && configuration.progress.nil?
-      animated = enabled && @out.respond_to?(:tty?) && @out.tty?
-      BuildProgress.new(out: @out, enabled: enabled, animated: animated)
+      config = DaggerRuby::Config.new(progress: configuration.progress, verify_version: false)
+      config.progress_reporter(out: @out, enabled: !json && dagger_session?, environment: @environment)
     end
   end
 end

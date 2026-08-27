@@ -26,6 +26,23 @@ class RubyBuildTest < Minitest::Test
     assert_includes config[1].fetch(1), '"ruby" = "3.4.9"'
   end
 
+  def test_uses_the_build_container_cpu_count_for_bundler_by_default
+    refute BoringBuilder::RubyBuild::BUNDLE_ENVIRONMENT.key?("BUNDLE_JOBS")
+    assert_includes BoringBuilder::RubyBuild::BUNDLE_INSTALL_COMMAND.last, "${BUNDLE_JOBS:-$(nproc)}"
+    refute_includes BoringBuilder::RubyBuild::BUNDLE_CONFIG, "BUNDLE_JOBS"
+  end
+
+  def test_removes_bundlers_compact_index_from_the_application
+    root = rack_project
+    configuration = BoringBuilder::Configuration.new(root: root)
+    project = BoringBuilder::Project.new(configuration).validate!
+    client = RecordingClient.new
+
+    BoringBuilder::RubyBuild.new(project, client).container
+
+    assert_includes client.calls, [:with_exec, [%w[rm -rf .bundle/cache]], {}]
+  end
+
   def test_installs_only_ruby_from_a_project_mise_file
     root = rack_project
     File.write(root.join("mise.toml"), <<~TOML)

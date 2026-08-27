@@ -4,7 +4,7 @@ module BoringBuilder
   class Pipeline
     attr_reader :project, :client, :progress
 
-    def initialize(project, client, environment: ENV, progress: BuildProgress.silent)
+    def initialize(project, client, environment: ENV, progress: DaggerRuby::Progress.silent)
       @project = project
       @client = client
       @environment = environment
@@ -124,7 +124,10 @@ module BoringBuilder
       return container if container.equal?(@last_synced_container)
 
       @last_synced_container = progress.step(name) do
-        progress.write { output.call } if output
+        if output
+          result = output.call
+          progress.write(result) unless progress.streaming?
+        end
         container.sync
       end
     end

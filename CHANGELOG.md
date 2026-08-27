@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0.alpha.2 - 2026-08-27
+
+- Stream clean, Docker-style build steps and command output through Dagger Ruby.
+- Run Bundler with the available CPUs unless `BUNDLE_JOBS` is explicitly configured.
+- Keep Rails artifacts identical across cold and restored dependency caches.
+
 ## 0.1.0.alpha.1 - 2026-08-27
 
 - Reintroduce BoringBuilder as a Ruby gem backed by Dagger Ruby.

@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
+require "dagger_ruby"
+
 require_relative "boringbuilder/version"
 require_relative "boringbuilder/errors"
 require_relative "boringbuilder/artifact"
 require_relative "boringbuilder/configuration"
 require_relative "boringbuilder/config_file"
 require_relative "boringbuilder/initializer"
-require_relative "boringbuilder/build_progress"
 require_relative "boringbuilder/boring_cache"
 require_relative "boringbuilder/mise"
 require_relative "boringbuilder/pipeline"

@@ -5,6 +5,7 @@ module BoringBuilder
     DEFAULT_EXCLUDES = %w[
       .env
       .env.*
+      .bundle/cache
       .git
       coverage
       dist
@@ -29,7 +30,7 @@ module BoringBuilder
       self
     end
 
-    def container(client, progress: BuildProgress.silent)
+    def container(client, progress: DaggerRuby::Progress.silent)
       return Pipeline.new(self, client, progress: progress).build(&configuration.pipeline) if custom_pipeline?
 
       builder = rails? ? RailsBuild : RubyBuild

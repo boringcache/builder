@@ -40,7 +40,7 @@ module BoringBuilder
         at: CACHE_PATH,
         entry: "mise",
         workdir: workdir,
-        name: "Prepare Mise toolchain"
+        name: "[build] RUN #{command.join(' ')}"
       )
     end
 
