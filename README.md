@@ -70,7 +70,7 @@ boringbuilder build --runtime docker --platform linux/arm64
 Rails applications can also use the included task:
 
 ```sh
-bin/rails boringbuilder:build
+bin/rails boring:build
 ```
 
 ## Caching

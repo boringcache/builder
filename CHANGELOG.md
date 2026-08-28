@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0.alpha.4 - 2026-08-28
+
+- Expose the Rails build task as `boring:build`.
+- Run the Rails task through the same pretty, streaming CLI experience as
+  `boringbuilder build`.
+- Keep BoringCache Artifact receipt JSON out of streamed build logs.
+
 ## 0.1.0.alpha.3 - 2026-08-27
 
 - Remove Bundler cache metadata before compiling assets so cold and restored Rails builds stay identical.

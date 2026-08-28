@@ -56,7 +56,7 @@ class RecordingNode
     case name
     when :publish then "registry.example/app@sha256:123"
     when :export_image, :export then arguments.first
-    when :stdout then @stdout || self
+    when :stdout, :contents then @stdout || self
     when :stderr then @stderr || self
     else self
     end

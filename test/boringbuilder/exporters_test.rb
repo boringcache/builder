@@ -78,11 +78,14 @@ class ExportersTest < Minitest::Test
     assert_includes client.calls, [:set_secret, %w[BORINGCACHE_SAVE_TOKEN save-token], {}]
     assert(client.calls.any? do |method, arguments, _options|
       method == :with_exec && arguments.first == [
+        "sh", "-c", "exec \"$@\" > /tmp/boringbuilder-artifact.json", "boringbuilder-artifact",
         "boringcache", "artifact", "push", "/artifact/app.tar.zst",
         "--name", "my-app-linux-arm64-tar-zst", "--include-hidden", "--json",
         "--compression", "none"
       ]
     end)
+    assert_includes client.calls, [:file, ["/tmp/boringbuilder-artifact.json"], {}]
+    assert_includes client.calls, [:contents, [], {}]
   end
 
   private
