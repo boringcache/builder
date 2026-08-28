@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0.alpha.5 - 2026-08-28
+
+- Record the exact local or BoringCache build result for deployment tools.
+- Finalize Rails runtime metadata without starting the application command.
+- Publish each release with the matching human changelog notes.
+
 ## 0.1.0.alpha.4 - 2026-08-28
 
 - Expose the Rails build task as `boring:build`.

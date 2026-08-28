@@ -85,7 +85,8 @@ See [Caching](docs/caching.md) for custom cached steps and restore-only builds.
 
 The default `tar.zst` output is intended for atomic filesystem deployers such as BoringDeploy. Without shared
 credentials it is written under `dist/`. With BoringCache save credentials it is published as a shared BoringCache
-Artifact instead; pass `--output` when a local copy is also wanted.
+Artifact instead; pass `--output` when a local copy is also wanted. Each successful export records its exact result in
+`tmp/builds/boringbuilder.json` so deployment tools can consume the same artifact without guessing.
 
 The same build can produce or publish a container image:
 

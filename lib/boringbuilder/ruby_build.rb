@@ -173,8 +173,9 @@ module BoringBuilder
         name: "[runtime] RUN mise reshim",
         workdir: application_path
       )
-      container = runtime_metadata(container).with_user(project.application_user)
-      progress.step("[runtime] Configure image") { container.sync }
+      container = container.with_user(project.application_user)
+      container = progress.step("[runtime] Configure image") { container.sync }
+      runtime_metadata(container)
     end
 
     def install_packages(container, packages, stage:)

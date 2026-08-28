@@ -20,6 +20,7 @@ require_relative "boringbuilder/ruby_build"
 require_relative "boringbuilder/rails_build"
 require_relative "boringbuilder/exporter"
 require_relative "boringbuilder/result"
+require_relative "boringbuilder/build_receipt"
 require_relative "boringbuilder/builder"
 require_relative "boringbuilder/cli"
 require_relative "boringbuilder/railtie" if defined?(Rails::Railtie)
