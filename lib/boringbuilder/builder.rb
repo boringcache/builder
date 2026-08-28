@@ -21,10 +21,12 @@ module BoringBuilder
         silent: configuration.progress.nil?
       )
 
-      DaggerRuby.connection(dagger_configuration) do |client|
+      result = DaggerRuby.connection(dagger_configuration) do |client|
         container = project.container(client, progress: progress)
         Exporter.new(project, client, container, runtime: resolved_runtime, progress: progress).call
       end
+      BuildReceipt.write(root: configuration.root, result: result)
+      result
     rescue DaggerRuby::DaggerError => e
       message = e.message.sub(/\s*\[traceparent:[^\]]+\]\s*\z/, "")
       raise BuildError, "Dagger build failed: #{message}"

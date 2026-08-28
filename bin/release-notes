@@ -1,0 +1,14 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../lib/boringbuilder/release_notes"
+require_relative "../lib/boringbuilder/version"
+
+begin
+  version = ARGV.fetch(0, BoringBuilder::VERSION)
+  path = ARGV.fetch(1, File.expand_path("../CHANGELOG.md", __dir__))
+  puts BoringBuilder::ReleaseNotes.read(path: path, version: version)
+rescue ArgumentError => e
+  warn e.message
+  exit 1
+end

@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 bundle check
+bundle exec ruby bin/release-notes > /dev/null
 bundle exec rake
 bundle exec bundle-audit check --update
 bundle exec rake build
