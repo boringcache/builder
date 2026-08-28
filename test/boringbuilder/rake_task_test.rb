@@ -24,35 +24,33 @@ class RakeTaskTest < Minitest::Test
 
   def test_builds_the_rails_application
     calls = []
-    start = lambda do |arguments|
-      calls << arguments
-      0
-    end
+    executable = Gem.bin_path("boringbuilder", "boringbuilder")
 
     with_environment("BORINGBUILDER_RUNTIME" => "docker", "BORINGBUILDER_OUTPUT" => "dist/app.tar.zst") do
       with_rails_root do
-        with_cli_start(start) do
+        with_kernel_exec(->(*arguments) { calls << arguments }) do
           Rake::Task["boring:build"].invoke
         end
       end
     end
 
     assert_equal [
-      ["build", "--runtime", "docker", "--output", "dist/app.tar.zst", Pathname.pwd.to_s]
+      [Gem.ruby, executable, "build", "--runtime", "docker", "--output", "dist/app.tar.zst",
+       Pathname.pwd.to_s]
     ], calls
   end
 
   private
 
-  def with_cli_start(replacement)
-    singleton_class = BoringBuilder::CLI.singleton_class
-    original = BoringBuilder::CLI.method(:start)
-    singleton_class.send(:remove_method, :start)
-    singleton_class.define_method(:start, replacement)
+  def with_kernel_exec(replacement)
+    singleton_class = Kernel.singleton_class
+    original = Kernel.method(:exec)
+    singleton_class.send(:remove_method, :exec)
+    singleton_class.define_method(:exec, replacement)
     yield
   ensure
-    singleton_class.send(:remove_method, :start)
-    singleton_class.define_method(:start, original)
+    singleton_class.send(:remove_method, :exec)
+    singleton_class.define_method(:exec, original)
   end
 
   def with_environment(values)
