@@ -5,6 +5,8 @@ require "json"
 module BoringBuilder
   module Exporters
     class BoringCache
+      RECEIPT_PATH = "/tmp/boringbuilder-artifact.json"
+
       attr_reader :project, :client, :cache
 
       def initialize(project, client, environment: ENV)
@@ -31,7 +33,8 @@ module BoringBuilder
         publisher = client.container.from(cache.cli_image)
         publisher = cache.prepare_artifact_publisher(publisher)
         path, publisher = mount_asset(publisher, asset)
-        output = publisher.with_exec(publish_command(path, asset.kind)).stdout
+        publisher = publisher.with_exec(quiet_publish_command(path, asset.kind))
+        output = publisher.file(RECEIPT_PATH).contents
         artifact = JSON.parse(output).fetch("artifact")
         validate_artifact!(artifact)
         Receipt.new(artifact_id: artifact.fetch("id"), artifact_name: artifact.fetch("name"))
@@ -71,6 +74,10 @@ module BoringBuilder
                    "--include-hidden", "--json"]
         command.push("--compression", "none") unless kind == :directory
         command
+      end
+
+      def quiet_publish_command(path, kind)
+        ["sh", "-c", "exec \"$@\" > #{RECEIPT_PATH}", "boringbuilder-artifact", *publish_command(path, kind)]
       end
 
       def validate_artifact!(artifact)
