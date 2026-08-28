@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0.alpha.6 - 2026-08-28
+
+- Run `bin/rails boring:build` as a standalone builder process so Dagger can
+  preserve the command, streaming progress, signals, and cleanup.
+
 ## 0.1.0.alpha.5 - 2026-08-28
 
 - Record the exact local or BoringCache build result for deployment tools.

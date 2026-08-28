@@ -29,8 +29,7 @@ namespace :boring do
     end
 
     command << Rails.root.to_s
-    status = BoringBuilder::CLI.start(command)
-    raise BoringBuilder::BuildError, "BoringBuilder exited unsuccessfully" unless status.zero?
+    Kernel.exec(Gem.ruby, Gem.bin_path("boringbuilder", "boringbuilder"), *command)
   end
 
   desc "Check the configured container runtime"
