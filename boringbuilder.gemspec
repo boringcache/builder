@@ -40,5 +40,5 @@ Gem::Specification.new do |spec|
   spec.executables = ["boringbuilder"]
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "dagger_ruby", "~> 0.11"
+  spec.add_dependency "dagger_ruby", "~> 0.11", ">= 0.11.1"
 end
