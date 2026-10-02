@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0.alpha.7 - 2026-10-02
+
+- Require Dagger Ruby 0.11.1 or newer for startup status and Dagger 0.21.9 support.
+- Update development dependencies.
+
 ## 0.1.0.alpha.6 - 2026-08-28
 
 - Run `bin/rails boring:build` as a standalone builder process so Dagger can

@@ -9,12 +9,12 @@ gemspec
 group :development do
   gem "bundler-audit", "~> 0.9"
   gem "rake", "~> 13.4"
-  gem "rubocop", "~> 1.90"
-  gem "rubocop-minitest", "~> 0.40"
+  gem "rubocop", "~> 1.91"
+  gem "rubocop-minitest", "~> 0.41"
   gem "rubocop-rake", "~> 0.7"
 end
 
 group :test do
   gem "minitest", "~> 6.0"
-  gem "simplecov", "~> 1.2"
+  gem "simplecov", "~> 1.2.0"
 end

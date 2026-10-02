@@ -1,6 +1,6 @@
 [tools]
 ruby = "4.0.6"
-dagger = "0.21.8"
+dagger = "0.21.9"
 
 [tasks.setup]
 description = "Install gem dependencies"
