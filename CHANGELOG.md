@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0.alpha.8 - 2026-10-16
+
+- Update the BoringCache CLI and build images to 1.42.0 with pinned multi-platform digests.
+- Trust copied project Mise configuration inside build containers before installing tools, while retaining
+  paranoid mode.
+
 ## 0.1.0.alpha.7 - 2026-10-02
 
 - Require Dagger Ruby 0.11.1 or newer for startup status and Dagger 0.21.9 support.
