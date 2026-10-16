@@ -28,6 +28,25 @@ class PipelineTest < Minitest::Test
     assert_called_with_path client, :with_mounted_cache, BoringBuilder::Mise::CACHE_PATH
   end
 
+  def test_trusts_copied_project_configs_before_installing_tools
+    root = build_project
+    File.write(root.join(".mise.toml"), "[tools]\nnode = \"24\"\n")
+    File.write(root.join(".tool-versions"), "node 24\n")
+    File.write(root.join("mise.lock"), "")
+    pipeline, client = pipeline_for(environment: {}, root: root)
+
+    pipeline.mise(tools: { node: "24" }, workdir: "/workspace")
+
+    commands = client.calls.filter_map { |name, arguments, _| arguments.first if name == :with_exec }
+    trust_commands = commands.select { |command| command.first(2) == %w[mise trust] }
+
+    assert_equal [
+      %w[mise trust -- /workspace/.mise.toml],
+      %w[mise trust -- /workspace/.tool-versions]
+    ], trust_commands
+    assert_operator commands.index(trust_commands.last), :<, commands.index(BoringBuilder::Mise::INSTALL_COMMAND)
+  end
+
   def test_uses_boringcache_for_the_mise_toolchain_when_shared_credentials_are_present
     pipeline, client = pipeline_for(
       environment: {

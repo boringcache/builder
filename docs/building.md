@@ -134,6 +134,8 @@ end
 
 `pipeline.mise` prepares the requested tools and application source in a Dagger container. Project versions in
 `mise.toml`, `.mise.toml`, or `.tool-versions` override recipe fallbacks, and `mise.lock` is respected when present.
+The build trusts the copied project configuration files inside its container before installing tools. Mise's
+paranoid mode remains enabled; host-side Mise trust is unchanged.
 Any tool in the [Mise registry](https://mise.jdx.dev/registry.html) can use the same shape.
 
 `pipeline.run` persists the declared path in the local Dagger engine or through BoringCache when shared credentials

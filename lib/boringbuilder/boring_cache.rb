@@ -2,10 +2,10 @@
 
 module BoringBuilder
   class BoringCache
-    CLI_IMAGE = "ghcr.io/boringcache/base:bookworm-v1.19.4@" \
-                "sha256:84d1e168a50fd086ecd4fdb2fd96f689982a6f3c61454acd8c7189e336f8f3ae"
-    BUILD_IMAGE = "ghcr.io/boringcache/base:bookworm-build-v1.19.4@" \
-                  "sha256:df4461581214c0052157041238a67b8da420e1399e4024bc857c68c74a9721cb"
+    CLI_IMAGE = "ghcr.io/boringcache/base:bookworm-v1.42.0@" \
+                "sha256:9d663a781f5e2ff07ee430cb73e99b6b01e00584583c78c27062680842673430"
+    BUILD_IMAGE = "ghcr.io/boringcache/base:bookworm-build-v1.42.0@" \
+                  "sha256:0d621a60a42741365f69d991b121e1a1ea3b900c360b11e265d99e27eeaaa311"
     TOKEN_NAMES = %w[BORINGCACHE_RESTORE_TOKEN BORINGCACHE_SAVE_TOKEN].freeze
     ENVIRONMENT_NAMES = %w[BORINGCACHE_API_URL BORINGCACHE_DEFAULT_WORKSPACE BORINGCACHE_WORKSPACE].freeze
 

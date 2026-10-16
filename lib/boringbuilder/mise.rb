@@ -7,7 +7,8 @@ module BoringBuilder
     DEFAULT_IMAGE = BoringCache::BUILD_IMAGE
     CACHE_PATH = "/mise/cache"
     INSTALL_COMMAND = %w[mise install].freeze
-    METADATA_FILES = %w[mise.toml .mise.toml .tool-versions mise.lock].freeze
+    CONFIG_FILES = %w[mise.toml .mise.toml .tool-versions].freeze
+    METADATA_FILES = [*CONFIG_FILES, "mise.lock"].freeze
     ENVIRONMENT = {
       "MISE_CACHE_DIR" => CACHE_PATH,
       "MISE_DATA_DIR" => "/mise",
@@ -32,6 +33,11 @@ module BoringBuilder
       container = with_environment(container)
       container = container.with_workdir(workdir)
                            .with_new_file("/etc/mise/config.toml", system_config(tools))
+      CONFIG_FILES.each do |name|
+        next unless project.root.join(name).file?
+
+        container = container.with_exec(["mise", "trust", "--", "#{workdir}/#{name}"])
+      end
       command = [*INSTALL_COMMAND, *Array(only).map(&:to_s)]
       pipeline.run(
         container,
