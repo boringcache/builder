@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0.alpha.9 - 2026-10-22
+
+- Update the BoringCache CLI and build images to 1.43.3 with pinned multi-platform digests and repaired eMudhra CA trust.
+
 ## 0.1.0.alpha.8 - 2026-10-16
 
 - Update the BoringCache CLI and build images to 1.42.0 with pinned multi-platform digests.
