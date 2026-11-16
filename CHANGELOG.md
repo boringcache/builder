@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0.alpha.11 - 2026-11-16
+
+- Update the BoringCache CLI and build images to 1.48.2 with pinned multi-platform digests.
+
 ## 0.1.0.alpha.10 - 2026-11-15
 
 - Update the BoringCache CLI and build images to 1.48.0 with pinned multi-platform digests.
